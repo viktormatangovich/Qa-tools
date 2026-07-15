@@ -1,0 +1,11 @@
+{
+  "appName": {
+    "message": "QA Tools"
+  },
+  "appDesc": {
+    "message": "Захват API-вызовов, обнаружение ошибок и экспорт для отладки"
+  },
+  "openTitle": {
+    "message": "Открыть QA Tools"
+  }
+}

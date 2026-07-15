@@ -1,0 +1,302 @@
+export const ru = {
+  // JSON Tree
+  findInDom: "Найти в DOM",
+  rescanDom: "Пересканировать DOM",
+  expandAll: "Развернуть всё",
+  collapse: "Свернуть",
+
+  // Header
+  appTitle: "QA Tools",
+  requestsCount: (n: number) => `${n} запросов`,
+  notCapturing: "Не захватывается",
+  cannotCapture: "Не удаётся захватить",
+
+  // Toolbar titles
+  breakpoints: "Точки остановки",
+  breakpointsActive: (n: number) => `Точки остановки (${n} активны)`,
+  mockRules: "Правила моков",
+  mockRulesActive: (n: number) => `Правила моков (${n} активны)`,
+  autoSelectOn: "Автовыбор ВКЛ",
+  autoSelectOff: "Автовыбор ВЫКЛ",
+  sessionHistory: "История сессий",
+  settings: "Настройки",
+  exportOptions: "Экспорт",
+
+  // Export menu
+  exportAsHar: "Экспорт как HAR",
+  exportToPostman: "Экспорт в Postman",
+  markdownReport: "Markdown отчёт",
+  exportOpenApi: "OpenAPI спецификация",
+  exportJsonSchema: "JSON Schema",
+  exportCsv: "CSV (таблица)",
+  exportBulkCurl: "Коллекция cURL",
+  saveSession: "Сохранить сессию",
+  clear: "Очистить",
+
+  // Filter tabs
+  all: "Все",
+  errors: "Ошибки",
+  slow: "Медленные",
+  console: "Консоль",
+
+  // Placeholders
+  filterByUrl: "Фильтр по URL...",
+  searchInBody: "Поиск в теле...",
+
+  // View modes
+  listView: "Список",
+  timelineView: "Временная шкала",
+  groupByDomain: "Группировка по домену",
+  compare: "Сравнить",
+  exitCompare: "Выйти из сравнения",
+  selectToCompare: (n: number) => `Выберите 2 запроса для сравнения (${n}/2)`,
+  viewDiff: "Показать различия",
+
+  // Sort options
+  sortBy: "Сортировка",
+  sortNewest: "Сначала новые",
+  sortOldest: "Сначала старые",
+  sortByMethod: "По методу",
+  sortByStatus: "По статусу",
+  sortByDuration: "По длительности",
+  sortByType: "По типу (fetch/xhr)",
+  sortByDomain: "По домену",
+
+  // Sort presets
+  sortPresets: "Присеты сортировки",
+  sortPresetMethodStatus: "Метод → Статус",
+  sortPresetMethodType: "Метод → Тип (fetch/xhr)",
+  sortPresetStatusMethod: "Статус → Метод",
+  sortPresetTypeMethod: "Тип (fetch/xhr) → Метод",
+  sortPresetTypeStatus: "Тип (fetch/xhr) → Статус",
+
+  // Debugger
+  captureStopped: "Захват остановлен",
+  reconnect: "Переподключиться",
+
+  // Breakpoint paused
+  cancel: "Отмена",
+  continue: "Продолжить",
+
+  // Empty states
+  noConsoleErrors: "Нет ошибок консоли",
+  noConsoleErrorsDesc: "JavaScript ошибки будут отображаться здесь",
+  noRequests: "Нет захваченных запросов",
+  noRequestsDesc: "Перейдите на страницу, чтобы начать",
+
+  // Request detail
+  copy: "Копировать",
+  copied: "Скопировано!",
+  error: "Ошибка",
+  status: "Статус",
+  key: "Ключ",
+  value: "Значение",
+  requestBody: "Тело запроса (JSON)",
+  send: "Отправить",
+  replay: "Повторить",
+
+  // Console error types
+  consoleError: "Ошибка",
+  consolePromise: "Promise",
+  consoleConsole: "Консоль",
+
+  // Settings
+  settingsTitle: "Настройки",
+  darkMode: "Тёмная тема",
+  lightMode: "Светлая тема",
+  fontSize: "Размер шрифта",
+  small: "Маленький",
+  medium: "Средний",
+  large: "Большой",
+
+  // Session History
+  sessionHistoryTitle: "История сессий",
+  load: "Загрузить",
+  delete: "Удалить",
+  noSessions: "Нет сохранённых сессий",
+
+  // Mock Manager
+  mockManagerTitle: "Менеджер моков",
+  addRule: "Добавить правило",
+  editRule: "Редактировать правило",
+  newRule: "Новое правило",
+  noMockRules: "Нет правил моков",
+  noMockRulesDesc: "Добавьте правило для перехвата запросов",
+  mockUrlPattern: "Шаблон URL",
+  mockUrlPatternPlaceholder: "например, /api/users/* или example.com/api/*",
+  mockUrlPatternHint:
+    "Используйте * как подстановочный знак. Совпадение по вхождению.",
+  mockMethod: "Метод",
+  mockStatusCode: "Код статуса",
+  mockStatusText: "Текст статуса",
+  mockResponseBody: "Тело ответа (JSON)",
+  mockResponseBodyPlaceholder: '{"message": "Мокированный ответ"}',
+  mockResponseHeaders: "Заголовки ответа",
+  mockResponseHeaderKey: "Ключ",
+  mockResponseHeaderValue: "Значение",
+  mockDelay: "Задержка (мс)",
+  mockDelayHint: "Искусственная задержка перед отправкой ответа",
+  mockDescription: "Описание (необязательно)",
+  enabled: "Включено",
+  disabled: "Отключено",
+  save: "Сохранить",
+  active: "активно",
+  noPattern: "(нет шаблона)",
+  rulesCount: (n: number) => `${n} правил`,
+  enableAll: "Включить все",
+  disableAll: "Отключить все",
+  deleteAll: "Удалить все",
+  importRules: "Импорт",
+  exportRules: "Экспорт",
+  importSuccess: "Правила импортированы",
+  importError: "Ошибка импорта",
+  confirmDeleteAll: "Удалить все правила?",
+  mockFromRequest: "Из запроса",
+  searchRules: "Поиск правил...",
+  statusPresets: "Быстрые статусы",
+  ok200: "200 OK",
+  created201: "201 Created",
+  noContent204: "204 No Content",
+  badRequest400: "400 Bad Request",
+  unauthorized401: "401 Unauthorized",
+  forbidden403: "403 Forbidden",
+  notFound404: "404 Not Found",
+  serverError500: "500 Server Error",
+
+  // Breakpoint Manager
+  breakpointManagerTitle: "Менеджер точек остановки",
+  addBreakpoint: "Добавить точку остановки",
+  noBreakpoints: "Нет точек остановки",
+  breakpointUrlPattern: "Шаблон URL",
+  breakpointMethod: "Метод",
+
+  // Load Test
+  loadTest: "Нагрузочное тестирование",
+  runTest: "Запустить тест",
+  stopTest: "Остановить",
+  runLoadTest: "Запустить нагрузочный тест",
+  configuration: "Конфигурация",
+  iterations: "Итерации (1-1000)",
+  concurrency: "Конкуренция (1-50)",
+  delayMs: "Задержка (мс)",
+  timeoutMs: "Тайм-аут (мс)",
+  running: "Выполняется...",
+  success: "успешно",
+  failed: "ошибок",
+  results: "Результаты",
+  partial: "(Частичные)",
+  successRate: "Успешность",
+  avgTime: "Ср. время",
+  reqPerSec: "Запросов/с",
+  min: "Мин",
+  max: "Макс",
+  median: "Медиана",
+  latencyDistribution: "Распределение задержек",
+  errorDetails: (n: number) => `Детали ошибок (${n})`,
+  history: "История",
+  clearAll: "Очистить всё",
+  noSavedTests: "Нет сохранённых тестов",
+  requests: "запросов",
+  viewHistory: "История",
+  corsWarning:
+    "Кросс-доменные запросы могут быть заблокированы CORS. Нагрузочное тестирование лучше всего работает для API на том же домене или API, которые разрешают ваше расширение.",
+
+  // Load Test — Charts
+  realtimeChart: "График в реальном времени",
+  durationOverTime: "Длительность по времени",
+  successRateOverTime: "Успешность по времени",
+  rpsOverTime: "Запросов/с по времени",
+  chartDuration: "Длительность (мс)",
+  chartSuccessRate: "Успешность",
+  chartRps: "Запросов/с",
+  chartTime: "Время (с)",
+  noData: "Нет данных",
+
+  // Load Test — Scenarios
+  scenarios: "Сценарии",
+  createScenario: "Создать сценарий",
+  scenarioName: "Название сценария",
+  scenarioNamePlaceholder: "например, Авторизация + API",
+  addStep: "Добавить шаг",
+  stepLabel: "Название шага",
+  stepLabelPlaceholder: "например, POST /login",
+  stepDelay: "Задержка перед шагом (мс)",
+  noScenarios: "Нет сценариев",
+  deleteScenario: "Удалить сценарий",
+  runScenario: "Запустить сценарий",
+  scenarioProgress: (step: number, total: number) => `Шаг ${step}/${total}`,
+  saveAsScenario: "Сохранить как сценарий",
+  scenarioFromRequest: "Из текущего запроса",
+
+  // Load Test — Comparison
+  comparison: "Сравнение",
+  compareResults: "Сравнить результаты",
+  selectTestA: "Тест A (эталон)",
+  selectTestB: "Тест B (новый)",
+  noComparisonData: "Выберите два теста для сравнения",
+  comparisonResult: "Результат сравнения",
+  parameter: "Параметр",
+  testA: "Тест A",
+  testB: "Тест B",
+  changePercent: "Изменение",
+  improvement: "улучшение",
+  degradation: "ухудшение",
+  noChange: "без изменений",
+  savedComparisons: "Сохранённые сравнения",
+  noSavedComparisons: "Нет сохранённых сравнений",
+  deleteComparison: "Удалить сравнение",
+  exportComparison: "Экспорт сравнения",
+
+  // Diff
+  diffTitle: "Сравнение запросов",
+  noDiff: "Нет различий",
+
+  // Collections
+  collections: "Коллекции",
+  createCollection: "Создать коллекцию",
+  collectionName: "Название коллекции",
+  collectionDescription: "Описание (необязательно)",
+  collectionColor: "Цвет",
+  addToCollection: "Добавить в коллекцию",
+  removeFromCollection: "Удалить из коллекции",
+  noCollections: "Нет коллекций",
+  deleteCollection: "Удалить коллекцию",
+  editCollection: "Редактировать коллекцию",
+
+  // Tags
+  tags: "Теги",
+  addTag: "Добавить тег",
+  tagName: "Название тега",
+  tagColor: "Цвет тега",
+  noTags: "Нет тегов",
+  deleteTag: "Удалить тег",
+
+  // Pinned
+  pin: "Закрепить",
+  unpin: "Открепить",
+  pinned: "Закреплённые",
+
+  // Group operations
+  groupOperations: "Групповые операции",
+  selectAll: "Выбрать всё",
+  deselectAll: "Снять всё",
+  selectedCount: (n: number) => `Выбрано: ${n}`,
+  deleteSelected: "Удалить выбранные",
+  exportSelected: "Экспортировать выбранные",
+  addSelectedToCollection: "В коллекцию",
+
+  // Keyboard shortcuts
+  keyboardShortcuts: "Горячие клавиши",
+  shortcutsInfo: "Горячие клавиши активны",
+  shortcutSearchUrl: "Поиск по URL",
+  shortcutSearchBody: "Поиск в теле",
+  shortcutExport: "Экспорт",
+  shortcutClear: "Очистить всё",
+  shortcutFilterAll: "Фильтр: Все",
+  shortcutFilterErrors: "Фильтр: Ошибки",
+  shortcutFilterSlow: "Фильтр: Медленные",
+  shortcutFilterConsole: "Фильтр: Консоль",
+  shortcutCompare: "Сравнение",
+  shortcutSettings: "Настройки",
+  shortcutClose: "Закрыть диалог",
+};
