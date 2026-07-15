@@ -1,14 +1,6 @@
-<p align="center">
-  <img src="qa-request-inspector/public/icons/icon128.png" alt="Reqpane icon" width="128" height="128">
-</p>
-
 # QA Tools
 
 **Reqpane** — это расширение для Chrome, которое перехватывает и отображает все API-запросы, ошибки консоли и сетевую активность прямо в боковой панели браузера. Создано для QA-инженеров и разработчиков, чтобы упростить отладку, тестирование и анализ сетевого взаимодействия веб-приложений.
-
-<p align="center">
-  <img src="qa-request-inspector/public/screenshot.png" alt="Reqpane screenshot" width="400">
-</p>
 
 ---
 
@@ -157,52 +149,6 @@ content.js (content script) — только поиск/подсветка в DO
 
 ---
 
-## Структура проекта
-
-```
-qa-request-inspector/
-├── src/sidepanel/
-│   ├── App.tsx                          # Главный компонент, управление состоянием
-│   ├── types.ts                         # TypeScript-интерфейсы
-│   ├── main.tsx                         # Точка входа
-│   ├── index.css                        # Глобальные стили
-│   ├── components/
-│   │   ├── common/                      # TabButton, FilterButton, CodeCopyBlock
-│   │   ├── requests/                    # RequestRow
-│   │   ├── detail/                      # RequestDetail (нижняя панель)
-│   │   ├── json/                        # JsonTreeView, JsonTreeNode
-│   │   ├── console/                     # ConsoleErrorRow, ConsoleErrorDetail
-│   │   ├── mocks/                       # MockManager, MockRuleEditor
-│   │   ├── breakpoints/                 # BreakpointManager, BreakpointRuleEditor
-│   │   ├── sessions/                    # SessionHistory
-│   │   ├── settings/                    # SettingsPanel
-│   │   ├── views/                       # TimelineView, GroupedView, DiffDialog
-│   │   ├── collections/                 # CollectionManager, TagManager
-│   │   └── loadtest/                    # LoadTestPanel
-│   ├── hooks/                           # useFieldUsage, useKeyboardShortcuts
-│   ├── locales/                         # Локализация (ru)
-│   └── utils/                           # Экспорт (HAR, Postman, Claude prompt)
-├── public/
-│   ├── manifest.json                    # Манифест расширения v3
-│   ├── background.js                    # Сервис-воркер (CDP)
-│   ├── content.js                       # Контент-скрипт
-│   ├── sidepanel.html                   # HTML-страница боковой панели
-│   └── icons/                           # Иконки расширения
-├── README.md                            # README проекта
-├── PRIVACY.md                           # Политика конфиденциальности
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
-```
-
----
-
 ## Конфиденциальность
 
 Все данные остаются локально в вашем браузере. Расширение **НЕ** собирает, не хранит и не передаёт персональные данные на внешние серверы. Подробнее — в [PRIVACY.md](qa-request-inspector/PRIVACY.md).
-
----
-
-## Лицензия
-
-MIT
