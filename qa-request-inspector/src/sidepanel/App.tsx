@@ -81,6 +81,7 @@ export default function App() {
   const [autoSelect, setAutoSelect] = useState(false);
   const [mockRules, setMockRules] = useState<MockRule[]>([]);
   const [showMockManager, setShowMockManager] = useState(false);
+  const [mockInitialRule, setMockInitialRule] = useState<MockRule | null>(null);
   const [breakpointRules, setBreakpointRules] = useState<BreakpointRule[]>([]);
   const [showBreakpointManager, setShowBreakpointManager] = useState(false);
   const [favorites, setFavorites] = useState<string[]>([]); // Array of request IDs
@@ -1393,6 +1394,16 @@ export default function App() {
                 onClose={() => setSelectedRequest(null)}
                 onCopy={() => copyToClipboard(selectedRequest)}
                 copied={copied}
+                mockRules={mockRules}
+                onCreateMock={(rule) => {
+                  saveMockRules([...mockRules, rule])
+                  setMockInitialRule(rule)
+                  setShowMockManager(true)
+                }}
+                onOpenMockManager={() => {
+                  setMockInitialRule(null)
+                  setShowMockManager(true)
+                }}
               />
             )}
           </Dialog.Popup>
@@ -1418,14 +1429,24 @@ export default function App() {
       </Dialog.Root>
 
       {/* Mock Manager Dialog */}
-      <Dialog.Root open={showMockManager} onOpenChange={setShowMockManager}>
+      <Dialog.Root
+        open={showMockManager}
+        onOpenChange={(open) => {
+          setShowMockManager(open)
+          if (!open) setMockInitialRule(null)
+        }}
+      >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
           <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[90vh] flex flex-col shadow-xl">
             <MockManager
               rules={mockRules}
               onSave={saveMockRules}
-              onClose={() => setShowMockManager(false)}
+              onClose={() => {
+                setShowMockManager(false)
+                setMockInitialRule(null)
+              }}
+              initialRule={mockInitialRule}
             />
           </Dialog.Popup>
         </Dialog.Portal>

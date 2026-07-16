@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Tabs } from '@base-ui-components/react/tabs'
 import { Collapsible } from '@base-ui-components/react/collapsible'
-import { Terminal, X, ChevronDown, Code, Braces, Play, Loader2, Plus, Trash2, Send, Activity } from 'lucide-react'
-import type { ApiRequest } from '../../types'
+import { Terminal, X, ChevronDown, Code, Braces, Play, Loader2, Plus, Trash2, Send, Activity, Shield } from 'lucide-react'
+import type { ApiRequest, MockRule } from '../../types'
 import { TabButton, CodeCopyBlock, JsonTreeView, LoadTestPanel } from '../index'
 import { generateCurl, generateFetchCode, generateTypeScript } from '../../utils'
 import { useFieldUsage } from '../../hooks/useFieldUsage'
@@ -13,6 +13,9 @@ interface RequestDetailProps {
   onClose: () => void
   onCopy: () => void
   copied: boolean
+  mockRules?: MockRule[]
+  onCreateMock?: (rule: MockRule) => void
+  onOpenMockManager?: () => void
 }
 
 export function RequestDetail({
@@ -20,10 +23,15 @@ export function RequestDetail({
   onClose,
   onCopy,
   copied,
+  mockRules = [],
+  onCreateMock,
+  onOpenMockManager,
 }: RequestDetailProps) {
   const [activeTab, setActiveTab] = useState('response')
   const [replaying, setReplaying] = useState(false)
   const [replayResult, setReplayResult] = useState<{ status: number; body: unknown; error?: string } | null>(null)
+  const [showMockMenu, setShowMockMenu] = useState(false)
+  const mockMenuRef = useRef<HTMLDivElement>(null)
 
   // Edit & Resend state
   const [editUrl, setEditUrl] = useState(request.url)
@@ -46,6 +54,43 @@ export function RequestDetail({
       fieldUsage.clearHighlights()
     }
   }, [request.id, fieldUsage.clearHighlights])
+
+  // Close mock menu on outside click
+  useEffect(() => {
+    if (!showMockMenu) return
+    const handleClick = (e: MouseEvent) => {
+      if (mockMenuRef.current && !mockMenuRef.current.contains(e.target as Node)) {
+        setShowMockMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showMockMenu])
+
+  const handleCreateMockFromRequest = () => {
+    const responseBodyStr = request.responseBody
+      ? typeof request.responseBody === 'string'
+        ? request.responseBody
+        : JSON.stringify(request.responseBody, null, 2)
+      : '{}'
+
+    const newRule: MockRule = {
+      id: crypto.randomUUID(),
+      urlPattern: request.url,
+      method: request.method as MockRule['method'] || 'ALL',
+      status: request.status || 200,
+      statusText: request.statusText || 'OK',
+      responseBody: responseBodyStr,
+      responseHeaders: { ...request.responseHeaders },
+      enabled: true,
+      delay: 0,
+      description: `Мок из запроса ${request.method} ${new URL(request.url).pathname}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    onCreateMock?.(newRule)
+    setShowMockMenu(false)
+  }
 
   const handleReplay = async () => {
     setReplaying(true)
@@ -153,6 +198,96 @@ export function RequestDetail({
           </span>
         </div>
         <div className="flex items-center gap-1">
+          {/* Mock button with dropdown */}
+          <div className="relative" ref={mockMenuRef}>
+            <button
+              onClick={() => setShowMockMenu(!showMockMenu)}
+              className="p-1.5 rounded transition-colors text-purple-500 hover:bg-purple-50"
+              title={t().mockFromRequest}
+            >
+              <Shield className="w-3.5 h-3.5" />
+            </button>
+            {showMockMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg z-50 py-1 min-w-[220px] max-h-[60vh] overflow-y-auto">
+                {/* Create new mock from this request */}
+                <button
+                  onClick={handleCreateMockFromRequest}
+                  className="w-full px-3 py-2 text-xs text-left hover:bg-[var(--color-hover)] flex items-center gap-2 text-purple-600 font-medium"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {t().createMockFromRequest}
+                </button>
+
+                {/* Divider */}
+                {mockRules.length > 0 && <hr className="my-1 border-[var(--color-border)]" />}
+
+                {/* Existing mocks list */}
+                {mockRules.length > 0 && (
+                  <>
+                    <div className="px-3 py-1 text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
+                      {t().existingMocks}
+                    </div>
+                    {mockRules.map(rule => (
+                      <button
+                        key={rule.id}
+                        onClick={() => {
+                          onCreateMock?.(rule)
+                          setShowMockMenu(false)
+                        }}
+                        className="w-full px-3 py-2 text-xs text-left hover:bg-[var(--color-hover)] flex items-center gap-2"
+                      >
+                        <span className={`text-[10px] font-mono font-semibold ${
+                          rule.method === 'GET' ? 'text-emerald-600' :
+                          rule.method === 'POST' ? 'text-blue-600' :
+                          rule.method === 'PUT' ? 'text-amber-600' :
+                          rule.method === 'PATCH' ? 'text-orange-600' :
+                          rule.method === 'DELETE' ? 'text-red-600' :
+                          'text-purple-600'
+                        }`}>
+                          {rule.method}
+                        </span>
+                        <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${
+                          rule.status < 300 ? 'bg-emerald-50 text-emerald-600' :
+                          rule.status < 400 ? 'bg-amber-50 text-amber-600' :
+                          'bg-red-50 text-red-600'
+                        }`}>
+                          {rule.status}
+                        </span>
+                        <span className="flex-1 truncate text-[var(--color-text-muted)]">
+                          {rule.urlPattern}
+                        </span>
+                        {rule.enabled ? (
+                          <span className="text-[10px] text-emerald-600 shrink-0">{t().enabled}</span>
+                        ) : (
+                          <span className="text-[10px] text-[var(--color-text-muted)] shrink-0">{t().disabled}</span>
+                        )}
+                      </button>
+                    ))}
+                  </>
+                )}
+
+                {/* Open mock manager */}
+                {onOpenMockManager && (
+                  <>
+                    <hr className="my-1 border-[var(--color-border)]" />
+                    <button
+                      onClick={() => {
+                        onOpenMockManager?.()
+                        setShowMockMenu(false)
+                      }}
+                      className="w-full px-3 py-2 text-xs text-left hover:bg-[var(--color-hover)] flex items-center gap-2 text-[var(--color-text-muted)]"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      {t().mockManagerTitle}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <button
             onClick={onCopy}
             className={`px-2 py-1 text-xs rounded transition-colors ${

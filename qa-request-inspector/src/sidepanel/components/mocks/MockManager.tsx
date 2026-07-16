@@ -18,15 +18,17 @@ interface MockManagerProps {
   rules: MockRule[]
   onSave: (rules: MockRule[]) => void
   onClose: () => void
+  initialRule?: MockRule | null
 }
 
 export function MockManager({
   rules,
   onSave,
   onClose,
+  initialRule,
 }: MockManagerProps) {
   const [localRules, setLocalRules] = useState<MockRule[]>(rules)
-  const [editingRule, setEditingRule] = useState<MockRule | null>(null)
+  const [editingRule, setEditingRule] = useState<MockRule | null>(initialRule ?? null)
   const [searchQuery, setSearchQuery] = useState('')
 
   const filteredRules = useMemo(() => {
