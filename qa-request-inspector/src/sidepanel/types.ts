@@ -194,6 +194,8 @@ export interface RequestCollection {
   description: string;
   color: string;
   requestIds: string[];
+  /** Полные данные запросов, сохранённые в коллекции (для постоянного хранения) */
+  requests: ApiRequest[];
   createdAt: number;
   updatedAt: number;
 }

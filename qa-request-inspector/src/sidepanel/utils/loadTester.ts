@@ -5,7 +5,6 @@ import type {
   LoadTestRun,
   LoadTestStats,
   LoadTestScenario,
-  ScenarioStep,
   LoadTestComparison,
   TimeSeriesPoint,
 } from "../types";

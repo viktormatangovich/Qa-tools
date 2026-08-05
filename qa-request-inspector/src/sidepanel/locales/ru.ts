@@ -42,6 +42,7 @@ export const ru = {
   // Placeholders
   filterByUrl: "Фильтр по URL...",
   searchInBody: "Поиск в теле...",
+  searchInResponse: "Поиск в ответе...",
 
   // View modes
   listView: "Список",
@@ -301,4 +302,8 @@ export const ru = {
   shortcutCompare: "Сравнение",
   shortcutSettings: "Настройки",
   shortcutClose: "Закрыть диалог",
+
+  // Collection Viewer
+  back: "Назад",
+  viewCollection: "Просмотр коллекции",
 };

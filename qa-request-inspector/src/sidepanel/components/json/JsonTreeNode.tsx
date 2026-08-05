@@ -11,6 +11,7 @@ interface JsonTreeNodeProps {
   toggleExpanded: (path: string) => void
   usageCache?: Map<string, UsageResult>
   onHighlight: (path: string, value: unknown) => void
+  searchQuery?: string
 }
 
 export function JsonTreeNode({
@@ -22,6 +23,7 @@ export function JsonTreeNode({
   toggleExpanded,
   usageCache,
   onHighlight,
+  searchQuery = '',
 }: JsonTreeNodeProps) {
   const isExpanded = expandedPaths.has(path)
   const valueType = getValueType(value)
@@ -30,6 +32,11 @@ export function JsonTreeNode({
 
   const childEntries = isExpandable ? Object.entries(value as object) : []
   const childCount = childEntries.length
+
+  // Check if this node matches the search query (exact match on value)
+  const q = searchQuery.trim()
+  const valueStr = !isExpandable ? String(formatValue()) : ''
+  const isMatch = q && valueStr.toLowerCase().includes(q.toLowerCase())
 
   // Get syntax highlighting color for value
   const getValueColor = () => {
@@ -43,7 +50,7 @@ export function JsonTreeNode({
   }
 
   // Format value for display
-  const formatValue = () => {
+  function formatValue() {
     if (valueType === 'string') {
       const str = value as string
       if (str.length > 80) {
@@ -59,10 +66,29 @@ export function JsonTreeNode({
     return String(value)
   }
 
+  // Highlight matching text in value
+  const highlightValue = () => {
+    const formatted = formatValue()
+    if (!q || !isMatch) return formatted
+    const lower = formatted.toLowerCase()
+    const idx = lower.indexOf(q.toLowerCase())
+    if (idx === -1) return formatted
+    return (
+      <>
+        {formatted.slice(0, idx)}
+        <mark className="bg-yellow-200 dark:bg-yellow-700 rounded px-0.5">{formatted.slice(idx, idx + q.length)}</mark>
+        {formatted.slice(idx + q.length)}
+      </>
+    )
+  }
+
   return (
     <div role="treeitem" aria-expanded={isExpandable ? isExpanded : undefined}>
       <div
-        className={`flex items-center gap-1 py-0.5 rounded hover:bg-hover cursor-pointer group`}
+        data-search-match={isMatch ? 'true' : undefined}
+        className={`flex items-center gap-1 py-0.5 rounded hover:bg-hover cursor-pointer group ${
+          isMatch ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''
+        }`}
         style={{ paddingLeft: `${depth * 16}px` }}
         onClick={() => isExpandable && toggleExpanded(path)}
       >
@@ -87,7 +113,7 @@ export function JsonTreeNode({
 
         {/* Value */}
         <span className={getValueColor()}>
-          {formatValue()}
+          {highlightValue()}
         </span>
 
         {/* Usage indicator */}
@@ -131,6 +157,7 @@ export function JsonTreeNode({
               toggleExpanded={toggleExpanded}
               usageCache={usageCache}
               onHighlight={onHighlight}
+              searchQuery={searchQuery}
             />
           ))}
           {/* Closing bracket */}

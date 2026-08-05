@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BreakpointManager,
   CollectionManager,
+  CollectionViewer,
   ConsoleErrorDetail,
   ConsoleErrorRow,
   DiffDialog,
@@ -161,6 +162,7 @@ export default function App() {
   const [tags, setTags] = useState<RequestTag[]>([]);
   const [requestMeta, setRequestMeta] = useState<Record<string, RequestMeta>>({});
   const [showCollectionManager, setShowCollectionManager] = useState(false);
+  const [viewingCollection, setViewingCollection] = useState<RequestCollection | null>(null);
   const [showTagManager, setShowTagManager] = useState(false);
 
   // Debugger state
@@ -231,7 +233,14 @@ export default function App() {
         if (result.sessions) setSessions(result.sessions);
         if (result.darkMode !== undefined) setDarkMode(result.darkMode);
         if (result.fontSize) setFontSize(result.fontSize);
-        if (result.collections) setCollections(result.collections);
+        if (result.collections) {
+          // Migrate old collections that don't have the `requests` field
+          const migrated = result.collections.map(c => ({
+            ...c,
+            requests: c.requests || [],
+          }));
+          setCollections(migrated);
+        }
         if (result.tags) setTags(result.tags);
         if (result.requestMeta) setRequestMeta(result.requestMeta);
       }
@@ -687,6 +696,7 @@ export default function App() {
       description: description || '',
       color: color || '#2563EB',
       requestIds: [],
+      requests: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -710,11 +720,19 @@ export default function App() {
     chrome.storage.local.set({ collections: updated, requestMeta: newMeta });
   }, [collections, requestMeta]);
 
-  const addToCollection = useCallback((collectionId: string, requestIds: string[]) => {
+  const addToCollection = useCallback((collectionId: string, requestIds: string[], reqs?: ApiRequest[]) => {
     const updated = collections.map(c => {
       if (c.id !== collectionId) return c;
       const newIds = [...new Set([...c.requestIds, ...requestIds])];
-      return { ...c, requestIds: newIds, updatedAt: Date.now() };
+      // Merge new requests, avoid duplicates by id
+      const existingIds = new Set(c.requests.map(r => r.id));
+      const newReqs = (reqs || []).filter(r => !existingIds.has(r.id));
+      return {
+        ...c,
+        requestIds: newIds,
+        requests: [...c.requests, ...newReqs],
+        updatedAt: Date.now(),
+      };
     });
     setCollections(updated);
     // Update requestMeta
@@ -722,6 +740,32 @@ export default function App() {
     requestIds.forEach(id => {
       newMeta[id] = { ...(newMeta[id] || {}), collectionId } as RequestMeta;
     });
+    setRequestMeta(newMeta);
+    chrome.storage.local.set({ collections: updated, requestMeta: newMeta });
+  }, [collections, requestMeta]);
+
+  /** Add a single request to a collection */
+  const addRequestToCollection = useCallback((collectionId: string, request: ApiRequest) => {
+    addToCollection(collectionId, [request.id], [request]);
+  }, [addToCollection]);
+
+  const removeFromCollection = useCallback((collectionId: string, requestId: string) => {
+    const updated = collections.map(c => {
+      if (c.id !== collectionId) return c;
+      return {
+        ...c,
+        requestIds: c.requestIds.filter(id => id !== requestId),
+        requests: c.requests.filter(r => r.id !== requestId),
+        updatedAt: Date.now(),
+      };
+    });
+    setCollections(updated);
+    // Update requestMeta
+    const newMeta = { ...requestMeta };
+    if (newMeta[requestId]?.collectionId === collectionId) {
+      const { collectionId: _, ...rest } = newMeta[requestId];
+      newMeta[requestId] = rest as RequestMeta;
+    }
     setRequestMeta(newMeta);
     chrome.storage.local.set({ collections: updated, requestMeta: newMeta });
   }, [collections, requestMeta]);
@@ -843,48 +887,44 @@ export default function App() {
             <div>
               <h1 className="text-base font-semibold">{t().appTitle}</h1>
               <p className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1">
-                <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                  debuggerStatus === 'attached' ? 'bg-green-500' :
+                <span className={`inline-block w-1.5 h-1.5 rounded-full ${debuggerStatus === 'attached' ? 'bg-green-500' :
                   debuggerStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
-                }`} />
+                  }`} />
                 {debuggerStatus === 'attached'
                   ? t().requestsCount(requests.length)
                   : debuggerStatus === 'error'
-                  ? (debuggerError || t().cannotCapture)
-                  : t().notCapturing}
+                    ? (debuggerError || t().cannotCapture)
+                    : t().notCapturing}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setShowBreakpointManager(true)}
-              className={`p-1.5 rounded transition-colors ${
-                breakpointRules.some((r) => r.enabled)
-                  ? 'bg-red-500 text-white'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
-              }`}
+              className={`p-1.5 rounded transition-colors ${breakpointRules.some((r) => r.enabled)
+                ? 'bg-red-500 text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
+                }`}
               title={t().breakpointsActive(breakpointRules.filter((r) => r.enabled).length)}
             >
               <Pause className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setShowMockManager(true)}
-              className={`p-1.5 rounded transition-colors ${
-                mockRules.some((r) => r.enabled)
-                  ? 'bg-purple-500 text-white'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
-              }`}
+              className={`p-1.5 rounded transition-colors ${mockRules.some((r) => r.enabled)
+                ? 'bg-purple-500 text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
+                }`}
               title={t().mockRulesActive(mockRules.filter((r) => r.enabled).length)}
             >
               <Shield className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setAutoSelect(!autoSelect)}
-              className={`p-1.5 rounded transition-colors ${
-                autoSelect
-                  ? 'bg-[var(--color-accent)] text-white'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
-              }`}
+              className={`p-1.5 rounded transition-colors ${autoSelect
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
+                }`}
               title={autoSelect ? t().autoSelectOn : t().autoSelectOff}
             >
               <Radio className="w-3.5 h-3.5" />
@@ -987,11 +1027,10 @@ export default function App() {
             </div>
             <button
               onClick={() => setGroupSelectionMode(prev => !prev)}
-              className={`p-1.5 rounded transition-colors ${
-                groupSelectionMode
-                  ? 'bg-[var(--color-accent)] text-white'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
-              }`}
+              className={`p-1.5 rounded transition-colors ${groupSelectionMode
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
+                }`}
               title={t().groupOperations}
             >
               <CheckSquare className="w-3.5 h-3.5" />
@@ -1083,33 +1122,30 @@ export default function App() {
           <div className="flex gap-1 p-0.5 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)]">
             <button
               onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded transition-colors ${
-                viewMode === 'list'
-                  ? 'bg-[var(--color-accent)] text-white'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              }`}
+              className={`p-1.5 rounded transition-colors ${viewMode === 'list'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                }`}
               title={t().listView}
             >
               <List className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setViewMode('timeline')}
-              className={`p-1.5 rounded transition-colors ${
-                viewMode === 'timeline'
-                  ? 'bg-[var(--color-accent)] text-white'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              }`}
+              className={`p-1.5 rounded transition-colors ${viewMode === 'timeline'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                }`}
               title={t().timelineView}
             >
               <BarChart3 className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setViewMode('grouped')}
-              className={`p-1.5 rounded transition-colors ${
-                viewMode === 'grouped'
-                  ? 'bg-[var(--color-accent)] text-white'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              }`}
+              className={`p-1.5 rounded transition-colors ${viewMode === 'grouped'
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                }`}
               title={t().groupByDomain}
             >
               <FolderOpen className="w-3.5 h-3.5" />
@@ -1159,11 +1195,10 @@ export default function App() {
                   setCompareRequests([null, null]);
                 }
               }}
-              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
-                compareMode
-                  ? 'bg-blue-500 text-white'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
-              }`}
+              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${compareMode
+                ? 'bg-blue-500 text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
+                }`}
             >
               <GitCompare className="w-3.5 h-3.5" />
               {compareMode ? t().exitCompare : t().compare}
@@ -1270,7 +1305,8 @@ export default function App() {
               <select
                 onChange={(e) => {
                   if (e.target.value) {
-                    addToCollection(e.target.value, Array.from(selectedIds));
+                    const selectedReqs = requests.filter(r => selectedIds.has(r.id));
+                    addToCollection(e.target.value, Array.from(selectedIds), selectedReqs);
                     e.target.value = '';
                   }
                 }}
@@ -1315,69 +1351,69 @@ export default function App() {
             </div>
           )
         ) : // API Requests List
-        filteredRequests.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-[var(--color-text-muted)]">
-            <Inbox className="w-12 h-12 mb-3 opacity-30" strokeWidth={1} />
-            <p className="text-sm">{t().noRequests}</p>
-            <p className="text-xs mt-1">{t().noRequestsDesc}</p>
-          </div>
-        ) : viewMode === 'timeline' ? (
-          <TimelineView
-            requests={filteredRequests}
-            selectedRequest={selectedRequest}
-            onSelect={(req) =>
-              setSelectedRequest(selectedRequest?.id === req.id ? null : req)
-            }
-          />
-        ) : viewMode === 'grouped' ? (
-          <GroupedView
-            groupedRequests={groupedRequests}
-            selectedRequest={selectedRequest}
-            favorites={favorites}
-            compareMode={compareMode}
-            compareRequests={compareRequests}
-            groupSelectionMode={groupSelectionMode}
-            selectedIds={selectedIds}
-            requestMeta={requestMeta}
-            tags={tags}
-            onSelect={(req) =>
-              setSelectedRequest(selectedRequest?.id === req.id ? null : req)
-            }
-            onToggleFavorite={toggleFavorite}
-            onToggleCompare={toggleCompareRequest}
-            onToggleGroupSelect={toggleGroupSelect}
-            onTogglePin={togglePin}
-          />
-        ) : (
-          <div className="divide-y divide-[var(--color-border)]">
-            {sortedRequests.map((req) => (
-              <RequestRow
-                key={req.id}
-                request={req}
-                isSelected={selectedRequest?.id === req.id}
-                isFavorite={favorites.includes(req.id)}
-                isPinned={requestMeta[req.id]?.pinned || false}
-                tags={requestMeta[req.id]?.tags?.map(tagId => tags.find(t => t.id === tagId)).filter(Boolean) as RequestTag[] | undefined}
-                compareMode={compareMode}
-                isCompareSelected={
-                  compareRequests[0]?.id === req.id ||
-                  compareRequests[1]?.id === req.id
-                }
-                groupSelectionMode={groupSelectionMode}
-                isGroupSelected={selectedIds.has(req.id)}
-                onClick={() =>
-                  setSelectedRequest(
-                    selectedRequest?.id === req.id ? null : req
-                  )
-                }
-                onToggleFavorite={() => toggleFavorite(req.id)}
-                onToggleCompare={() => toggleCompareRequest(req)}
-                onToggleGroupSelect={() => toggleGroupSelect(req.id)}
-                onTogglePin={() => togglePin(req.id)}
-              />
-            ))}
-          </div>
-        )}
+          filteredRequests.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-[var(--color-text-muted)]">
+              <Inbox className="w-12 h-12 mb-3 opacity-30" strokeWidth={1} />
+              <p className="text-sm">{t().noRequests}</p>
+              <p className="text-xs mt-1">{t().noRequestsDesc}</p>
+            </div>
+          ) : viewMode === 'timeline' ? (
+            <TimelineView
+              requests={filteredRequests}
+              selectedRequest={selectedRequest}
+              onSelect={(req) =>
+                setSelectedRequest(selectedRequest?.id === req.id ? null : req)
+              }
+            />
+          ) : viewMode === 'grouped' ? (
+            <GroupedView
+              groupedRequests={groupedRequests}
+              selectedRequest={selectedRequest}
+              favorites={favorites}
+              compareMode={compareMode}
+              compareRequests={compareRequests}
+              groupSelectionMode={groupSelectionMode}
+              selectedIds={selectedIds}
+              requestMeta={requestMeta}
+              tags={tags}
+              onSelect={(req) =>
+                setSelectedRequest(selectedRequest?.id === req.id ? null : req)
+              }
+              onToggleFavorite={toggleFavorite}
+              onToggleCompare={toggleCompareRequest}
+              onToggleGroupSelect={toggleGroupSelect}
+              onTogglePin={togglePin}
+            />
+          ) : (
+            <div className="divide-y divide-[var(--color-border)]">
+              {sortedRequests.map((req) => (
+                <RequestRow
+                  key={req.id}
+                  request={req}
+                  isSelected={selectedRequest?.id === req.id}
+                  isFavorite={favorites.includes(req.id)}
+                  isPinned={requestMeta[req.id]?.pinned || false}
+                  tags={requestMeta[req.id]?.tags?.map(tagId => tags.find(t => t.id === tagId)).filter(Boolean) as RequestTag[] | undefined}
+                  compareMode={compareMode}
+                  isCompareSelected={
+                    compareRequests[0]?.id === req.id ||
+                    compareRequests[1]?.id === req.id
+                  }
+                  groupSelectionMode={groupSelectionMode}
+                  isGroupSelected={selectedIds.has(req.id)}
+                  onClick={() =>
+                    setSelectedRequest(
+                      selectedRequest?.id === req.id ? null : req
+                    )
+                  }
+                  onToggleFavorite={() => toggleFavorite(req.id)}
+                  onToggleCompare={() => toggleCompareRequest(req)}
+                  onToggleGroupSelect={() => toggleGroupSelect(req.id)}
+                  onTogglePin={() => togglePin(req.id)}
+                />
+              ))}
+            </div>
+          )}
       </div>
 
       {/* Request Detail Bottom Sheet */}
@@ -1404,6 +1440,8 @@ export default function App() {
                   setMockInitialRule(null)
                   setShowMockManager(true)
                 }}
+                collections={collections}
+                onAddToCollection={addRequestToCollection}
               />
             )}
           </Dialog.Popup>
@@ -1505,8 +1543,11 @@ export default function App() {
 
       {/* Collection Manager Dialog */}
       <Dialog.Root
-        open={showCollectionManager}
-        onOpenChange={setShowCollectionManager}
+        open={showCollectionManager && !viewingCollection}
+        onOpenChange={(open) => {
+          setShowCollectionManager(open)
+          if (!open) setViewingCollection(null)
+        }}
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
@@ -1515,8 +1556,35 @@ export default function App() {
               collections={collections}
               onCreate={createCollection}
               onDelete={deleteCollection}
+              onViewCollection={(collection) => setViewingCollection(collection)}
               onClose={() => setShowCollectionManager(false)}
             />
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Collection Viewer Dialog */}
+      <Dialog.Root
+        open={!!viewingCollection}
+        onOpenChange={(open) => {
+          if (!open) setViewingCollection(null)
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
+          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[85vh] flex flex-col shadow-xl">
+            {viewingCollection && (
+              <CollectionViewer
+                collection={viewingCollection}
+                onRemoveRequest={removeFromCollection}
+                onSelectRequest={(req: ApiRequest) => {
+                  setSelectedRequest(req)
+                  setViewingCollection(null)
+                  setShowCollectionManager(false)
+                }}
+                onBack={() => setViewingCollection(null)}
+              />
+            )}
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>

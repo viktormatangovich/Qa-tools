@@ -1,4 +1,4 @@
-import { Bookmark, Plus, Trash2, X } from 'lucide-react'
+import { Bookmark, Plus, Trash2, X, Eye } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import type { RequestCollection } from '../../types'
 import { t } from '../../locales'
@@ -7,6 +7,7 @@ interface CollectionManagerProps {
   collections: RequestCollection[]
   onCreate: (name: string, description?: string, color?: string) => void
   onDelete: (id: string) => void
+  onViewCollection: (collection: RequestCollection) => void
   onClose: () => void
 }
 
@@ -19,6 +20,7 @@ export function CollectionManager({
   collections,
   onCreate,
   onDelete,
+  onViewCollection,
   onClose,
 }: CollectionManagerProps) {
   const [newName, setNewName] = useState('')
@@ -73,9 +75,8 @@ export function CollectionManager({
                 <button
                   key={color}
                   onClick={() => setNewColor(color)}
-                  className={`w-4 h-4 rounded-full transition-transform ${
-                    newColor === color ? 'scale-125 ring-1 ring-offset-1 ring-[var(--color-accent)]' : ''
-                  }`}
+                  className={`w-4 h-4 rounded-full transition-transform ${newColor === color ? 'scale-125 ring-1 ring-offset-1 ring-[var(--color-accent)]' : ''
+                    }`}
                   style={{ backgroundColor: color }}
                 />
               ))}
@@ -98,33 +99,54 @@ export function CollectionManager({
             <p className="text-xs">{t().noCollections}</p>
           </div>
         ) : (
-          collections.map(collection => (
-            <div
-              key={collection.id}
-              className="flex items-center gap-3 p-3 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]"
-            >
+          collections.map(collection => {
+            const requestCount = collection.requests.length
+            return (
               <div
-                className="w-3 h-3 rounded-full shrink-0"
-                style={{ backgroundColor: collection.color }}
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate">{collection.name}</p>
-                {collection.description && (
-                  <p className="text-[10px] text-[var(--color-text-muted)] truncate">{collection.description}</p>
-                )}
-                <p className="text-[10px] text-[var(--color-text-muted)]">
-                  {collection.requestIds.length} {t().requests}
-                </p>
-              </div>
-              <button
-                onClick={() => onDelete(collection.id)}
-                className="p-1 rounded text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-50 transition-colors"
-                title={t().deleteCollection}
+                key={collection.id}
+                className="flex items-center gap-3 p-3 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] hover:bg-[var(--color-hover)] transition-colors cursor-pointer group"
+                onClick={() => onViewCollection(collection)}
               >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))
+                <div
+                  className="w-3 h-3 rounded-full shrink-0"
+                  style={{ backgroundColor: collection.color }}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{collection.name}</p>
+                  {collection.description && (
+                    <p className="text-[10px] text-[var(--color-text-muted)] truncate">{collection.description}</p>
+                  )}
+                  <p className="text-[10px] text-[var(--color-text-muted)]">
+                    {requestCount} {t().requests}
+                  </p>
+                </div>
+
+                {/* View button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onViewCollection(collection)
+                  }}
+                  className="p-1.5 rounded text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-hover)] transition-colors opacity-0 group-hover:opacity-100"
+                  title={t().viewCollection}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                </button>
+
+                {/* Delete button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDelete(collection.id)
+                  }}
+                  className="p-1.5 rounded text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
+                  title={t().deleteCollection}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )
+          })
         )}
       </div>
     </div>

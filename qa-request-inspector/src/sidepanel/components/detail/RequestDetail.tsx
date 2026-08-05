@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Tabs } from '@base-ui-components/react/tabs'
 import { Collapsible } from '@base-ui-components/react/collapsible'
-import { Terminal, X, ChevronDown, Code, Braces, Play, Loader2, Plus, Trash2, Send, Activity, Shield } from 'lucide-react'
-import type { ApiRequest, MockRule } from '../../types'
+import { Terminal, X, ChevronDown, Code, Braces, Play, Loader2, Plus, Trash2, Send, Activity, Shield, Bookmark } from 'lucide-react'
+import type { ApiRequest, MockRule, RequestCollection } from '../../types'
 import { TabButton, CodeCopyBlock, JsonTreeView, LoadTestPanel } from '../index'
 import { generateCurl, generateFetchCode, generateTypeScript } from '../../utils'
 import { useFieldUsage } from '../../hooks/useFieldUsage'
@@ -16,6 +16,8 @@ interface RequestDetailProps {
   mockRules?: MockRule[]
   onCreateMock?: (rule: MockRule) => void
   onOpenMockManager?: () => void
+  collections?: RequestCollection[]
+  onAddToCollection?: (collectionId: string, request: ApiRequest) => void
 }
 
 export function RequestDetail({
@@ -26,12 +28,17 @@ export function RequestDetail({
   mockRules = [],
   onCreateMock,
   onOpenMockManager,
+  collections = [],
+  onAddToCollection,
 }: RequestDetailProps) {
   const [activeTab, setActiveTab] = useState('response')
   const [replaying, setReplaying] = useState(false)
   const [replayResult, setReplayResult] = useState<{ status: number; body: unknown; error?: string } | null>(null)
   const [showMockMenu, setShowMockMenu] = useState(false)
+  const [showCollectionMenu, setShowCollectionMenu] = useState(false)
+  const [responseSearchQuery, setResponseSearchQuery] = useState('')
   const mockMenuRef = useRef<HTMLDivElement>(null)
+  const collectionMenuRef = useRef<HTMLDivElement>(null)
 
   // Edit & Resend state
   const [editUrl, setEditUrl] = useState(request.url)
@@ -66,6 +73,18 @@ export function RequestDetail({
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [showMockMenu])
+
+  // Close collection menu on outside click
+  useEffect(() => {
+    if (!showCollectionMenu) return
+    const handleClick = (e: MouseEvent) => {
+      if (collectionMenuRef.current && !collectionMenuRef.current.contains(e.target as Node)) {
+        setShowCollectionMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showCollectionMenu])
 
   const handleCreateMockFromRequest = () => {
     const responseBodyStr = request.responseBody
@@ -198,6 +217,55 @@ export function RequestDetail({
           </span>
         </div>
         <div className="flex items-center gap-1">
+          {/* Add to collection button with dropdown */}
+          {collections.length > 0 && (
+            <div className="relative" ref={collectionMenuRef}>
+              <button
+                onClick={() => setShowCollectionMenu(!showCollectionMenu)}
+                className="p-1.5 rounded transition-colors text-amber-500 hover:bg-amber-50"
+                title={t().addToCollection}
+              >
+                <Bookmark className="w-3.5 h-3.5" />
+              </button>
+              {showCollectionMenu && (
+                <div className="absolute right-0 top-full mt-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg z-50 py-1 min-w-[200px] max-h-[50vh] overflow-y-auto">
+                  <div className="px-3 py-1 text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
+                    {t().collections}
+                  </div>
+                  {collections.map(collection => {
+                    const alreadyIn = collection.requestIds.includes(request.id)
+                    return (
+                      <button
+                        key={collection.id}
+                        onClick={() => {
+                          if (!alreadyIn) {
+                            onAddToCollection?.(collection.id, request)
+                          }
+                          setShowCollectionMenu(false)
+                        }}
+                        disabled={alreadyIn}
+                        className={`w-full px-3 py-2 text-xs text-left flex items-center gap-2 ${
+                          alreadyIn
+                            ? 'text-[var(--color-text-muted)] opacity-50 cursor-not-allowed'
+                            : 'hover:bg-[var(--color-hover)]'
+                        }`}
+                      >
+                        <div
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: collection.color }}
+                        />
+                        <span className="flex-1 truncate">{collection.name}</span>
+                        {alreadyIn && (
+                          <span className="text-[10px] text-emerald-600">{t().enabled}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Mock button with dropdown */}
           <div className="relative" ref={mockMenuRef}>
             <button
@@ -337,6 +405,8 @@ export function RequestDetail({
                 onScan={fieldUsage.scanAllFields}
                 scanStatus={fieldUsage.scanStatus}
                 progress={fieldUsage.progress}
+                searchQuery={responseSearchQuery}
+                onSearchChange={setResponseSearchQuery}
               />
             ) : (
               <div className="text-xs text-text-muted italic">(пустой ответ)</div>
