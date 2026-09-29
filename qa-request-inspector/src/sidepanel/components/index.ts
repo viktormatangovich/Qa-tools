@@ -10,3 +10,4 @@ export * from "./views";
 export * from "./settings";
 export * from "./loadtest";
 export * from "./collections";
+export * from "./qa";

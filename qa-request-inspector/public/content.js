@@ -268,6 +268,95 @@ class HighlightManager {
 const domSearcher = new DOMFieldSearcher();
 const highlightManager = new HighlightManager();
 
+// ========================================
+// Lightweight DOM / accessibility QA checks
+// ========================================
+
+class DOMQAChecker {
+  isVisible(element) {
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.offsetParent !== null;
+  }
+
+  selectorFor(element) {
+    return domSearcher.generateSelector(element);
+  }
+
+  labelledByText(element) {
+    return (element.getAttribute('aria-labelledby') || '').split(/\s+/)
+      .filter(Boolean)
+      .some((id) => document.getElementById(id)?.textContent?.trim());
+  }
+
+  hasAccessibleName(element) {
+    return Boolean(
+      element.getAttribute('aria-label')?.trim() ||
+      this.labelledByText(element) ||
+      element.getAttribute('title')?.trim() ||
+      (element.labels && Array.from(element.labels).some((label) => label.textContent?.trim()))
+    );
+  }
+
+  elementDescription(element) {
+    const attributes = ['data-testid', 'id', 'name', 'aria-label', 'title', 'placeholder', 'alt'];
+    const details = attributes
+      .map((name) => [name, element.getAttribute(name)?.trim()])
+      .filter(([, value]) => Boolean(value))
+      .slice(0, 3)
+      .map(([name, value]) => `${name}="${value.slice(0, 80)}"`);
+    const text = element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 80);
+    if (text) details.push(`text="${text}"`);
+    return `<${element.tagName.toLowerCase()}${details.length ? ` ${details.join(' ')}` : ''}>`;
+  }
+
+  finding(type, element) {
+    return {
+      type,
+      selector: this.selectorFor(element),
+      tagName: element.tagName.toLowerCase(),
+      elementDescription: this.elementDescription(element),
+      pageUrl: location.href,
+      pageTitle: document.title,
+      timestamp: Date.now(),
+    };
+  }
+
+  run() {
+    if (!document.body) return { findings: [] };
+    const findings = [];
+    const MAX_FINDINGS = 200;
+    const add = (type, element) => {
+      if (findings.length < MAX_FINDINGS) findings.push(this.finding(type, element));
+    };
+
+    document.querySelectorAll('img').forEach((image) => {
+      if (!this.isVisible(image)) return;
+      const decorative = image.getAttribute('role') === 'presentation' || image.getAttribute('aria-hidden') === 'true';
+      if (!decorative && !image.hasAttribute('alt')) add('missing-alt', image);
+      // Do not report images that are still loading; lazy images are a normal pattern.
+      if (image.complete && image.currentSrc && image.naturalWidth === 0) add('broken-image', image);
+    });
+
+    document.querySelectorAll('input, select, textarea').forEach((control) => {
+      if (!this.isVisible(control) || control instanceof HTMLInputElement && control.type === 'hidden') return;
+      const inputButton = control instanceof HTMLInputElement && ['button', 'submit', 'reset', 'image'].includes(control.type);
+      if (inputButton) return;
+      if (!this.hasAccessibleName(control)) add('input-without-label', control);
+    });
+
+    document.querySelectorAll('button, input[type="button"], input[type="submit"], input[type="reset"]').forEach((button) => {
+      if (!this.isVisible(button)) return;
+      const inputValue = button instanceof HTMLInputElement ? button.value.trim() : '';
+      const text = button.textContent?.trim() || inputValue;
+      if (!text && !this.hasAccessibleName(button)) add('button-without-accessible-name', button);
+    });
+
+    return { findings };
+  }
+}
+
+const domQAChecker = new DOMQAChecker();
+
 // Handle DOM search messages from side panel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'SEARCH_DOM_FOR_VALUE') {
@@ -291,6 +380,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'CLEAR_HIGHLIGHTS') {
     highlightManager.clearHighlights();
     sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'RUN_DOM_QA_CHECKS') {
+    sendResponse(domQAChecker.run());
     return true;
   }
 });

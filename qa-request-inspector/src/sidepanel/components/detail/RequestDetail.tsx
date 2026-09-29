@@ -7,6 +7,7 @@ import { TabButton, CodeCopyBlock, JsonTreeView, LoadTestPanel } from '../index'
 import { generateCurl, generateFetchCode, generateTypeScript } from '../../utils'
 import { useFieldUsage } from '../../hooks/useFieldUsage'
 import { t } from '../../locales'
+import type { NegativeScenario } from '../../qa/negativeTesting'
 
 interface RequestDetailProps {
   request: ApiRequest
@@ -18,6 +19,7 @@ interface RequestDetailProps {
   onOpenMockManager?: () => void
   collections?: RequestCollection[]
   onAddToCollection?: (collectionId: string, request: ApiRequest) => void
+  onCreateNegativeMock?: (scenario: NegativeScenario) => void
 }
 
 export function RequestDetail({
@@ -30,6 +32,7 @@ export function RequestDetail({
   onOpenMockManager,
   collections = [],
   onAddToCollection,
+  onCreateNegativeMock,
 }: RequestDetailProps) {
   const [activeTab, setActiveTab] = useState('response')
   const [replaying, setReplaying] = useState(false)
@@ -285,6 +288,16 @@ export function RequestDetail({
                   <Plus className="w-3.5 h-3.5" />
                   {t().createMockFromRequest}
                 </button>
+
+                {onCreateNegativeMock && (
+                  <>
+                    <hr className="my-1 border-[var(--color-border)]" />
+                    <div className="px-3 py-1 text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">Проверить состояние ошибки</div>
+                    <div className="grid grid-cols-4 gap-1 px-2 pb-2">
+                      {(['401', '403', '404', '409', '429', '500', '502', '503', 'empty', 'malformed-json', 'missing-field', 'null-field', 'delay-1s', 'delay-3s', 'delay-5s', 'timeout'] as NegativeScenario[]).map((scenario) => <button key={scenario} onClick={() => { onCreateNegativeMock(scenario); setShowMockMenu(false); }} className="rounded border border-[var(--color-border)] px-1 py-1 text-[10px] hover:bg-[var(--color-hover)]">{scenario}</button>)}
+                    </div>
+                  </>
+                )}
 
                 {/* Divider */}
                 {mockRules.length > 0 && <hr className="my-1 border-[var(--color-border)]" />}

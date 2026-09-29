@@ -17,6 +17,7 @@ interface RequestRowProps {
   onToggleCompare?: () => void
   onToggleGroupSelect?: () => void
   onTogglePin?: () => void
+  contractStatus?: 'passed' | 'failed' | 'undocumented'
 }
 
 export function RequestRow({
@@ -34,6 +35,7 @@ export function RequestRow({
   onToggleCompare,
   onToggleGroupSelect,
   onTogglePin,
+  contractStatus,
 }: RequestRowProps) {
   const isError = request.status >= 400 || request.error
   const isSlow = request.duration > 1000
@@ -115,6 +117,7 @@ export function RequestRow({
             {isSlow && <Turtle className="w-3 h-3" />}
             {(request.duration / 1000).toFixed(2)}s
           </span>
+          {contractStatus && <span className={`text-[10px] ${contractStatus === 'passed' ? 'text-emerald-600' : contractStatus === 'failed' ? 'text-red-600' : 'text-text-muted'}`}>{contractStatus === 'passed' ? '✓ Контракт' : contractStatus === 'failed' ? '✕ Контракт' : '? Контракт'}</span>}
           {responseSize > 0 && (
             <span className="text-[10px] text-text-muted">
               {formatBytes(responseSize)}

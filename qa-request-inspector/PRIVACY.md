@@ -20,6 +20,7 @@ The extension stores the following data locally on your device:
 - **Saved sessions** - Request history you explicitly save
 - **Load test history** - Results from load tests you run
 - **Favorites** - Requests you mark as favorites
+- **QA settings and OpenAPI specifications** - Analyzer thresholds and specifications you explicitly paste
 
 This data never leaves your browser and is not accessible to the extension developer or any third party.
 

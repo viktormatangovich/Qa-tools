@@ -26,6 +26,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BreakpointManager,
+  BugReportDialog,
   CollectionManager,
   CollectionViewer,
   ConsoleErrorDetail,
@@ -36,6 +37,7 @@ import {
   MockManager,
   RequestDetail,
   RequestRow,
+  QACheckView,
   SessionHistory,
   SettingsPanel,
   TagManager,
@@ -53,6 +55,13 @@ import type {
   SortOption,
   SortPresetId,
 } from './types';
+import { defaultQASettings, qaRulesEngine } from './qa';
+import type { DOMFinding, QAIssue, QAIssueCategory, QAIssueSeverity, QASettings } from './qa';
+import { contractCoverage, contractIssues, matchEndpoint, parseOpenApiSpec } from './qa/contract/contractChecker';
+import { createSessionReport, createSessionReportHtml, createSessionReportJson } from './qa/report';
+import { createNegativeMock } from './qa/negativeTesting';
+import { compareEnvironments } from './qa/environmentCompare';
+import type { OpenApiDocument } from './qa/contract/types';
 import {
   generateClaudePrompt,
   generateHar,
@@ -73,9 +82,17 @@ export default function App() {
     null
   );
   const [selectedError, setSelectedError] = useState<ConsoleError | null>(null);
-  const [filter, setFilter] = useState<'all' | 'errors' | 'slow' | 'console'>(
+  const [filter, setFilter] = useState<'all' | 'errors' | 'slow' | 'console' | 'qa'>(
     'all'
   );
+  const [qaFilter, setQaFilter] = useState<'all' | QAIssueSeverity | QAIssueCategory>('all');
+  const [domFindings, setDomFindings] = useState<DOMFinding[]>([]);
+  const [domChecksLoading, setDomChecksLoading] = useState(false);
+  const [qaSettings, setQASettings] = useState<QASettings>(defaultQASettings);
+  const [dismissedQAIssueIds, setDismissedQAIssueIds] = useState<Set<string>>(() => new Set());
+  const [excludedQARuleIds, setExcludedQARuleIds] = useState<string[]>([]);
+  const [contractSpecText, setContractSpecText] = useState('');
+  const [bugReportIssue, setBugReportIssue] = useState<QAIssue | null>(null);
   const [urlFilter, setUrlFilter] = useState('');
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -176,6 +193,29 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [fontSize, setFontSize] = useState<FontSize>('medium');
 
+  // The engine only runs when captured data changes, never during unrelated UI renders.
+  const contractDocument = useMemo<OpenApiDocument | null>(() => {
+    if (!contractSpecText.trim()) return null;
+    try { return parseOpenApiSpec(contractSpecText); } catch { return null; }
+  }, [contractSpecText]);
+  const contractError = useMemo(() => {
+    if (!contractSpecText.trim()) return null;
+    try { parseOpenApiSpec(contractSpecText); return null; } catch (error) { return (error as Error).message; }
+  }, [contractSpecText]);
+  const qaIssues = useMemo(() => !qaSettings.autoQAEnabled ? [] : [...qaRulesEngine.analyze({
+    requests,
+    consoleErrors,
+    domFindings,
+    settings: qaSettings,
+  }), ...(contractDocument && qaSettings.contractValidationEnabled ? contractIssues(contractDocument, requests) : [])]
+    .filter((issue) => !dismissedQAIssueIds.has(issue.id) && !excludedQARuleIds.includes(issue.ruleId)), [requests, consoleErrors, domFindings, qaSettings, contractDocument, dismissedQAIssueIds, excludedQARuleIds]);
+  const coverage = useMemo(() => contractDocument && qaSettings.contractValidationEnabled ? contractCoverage(contractDocument, requests) : null, [contractDocument, requests, qaSettings.contractValidationEnabled]);
+  const contractStatusByRequest = useMemo(() => new Map(requests.map((request) => {
+    if (!contractDocument) return [request.id, undefined] as const;
+    if (!matchEndpoint(contractDocument, request)) return [request.id, 'undocumented'] as const;
+    return [request.id, qaIssues.some((issue) => issue.category === 'contract' && issue.requestId === request.id) ? 'failed' : 'passed'] as const;
+  })), [requests, contractDocument, qaIssues]);
+
   // Connect to background via port (triggers debugger attach)
   useEffect(() => {
     const port = chrome.runtime.connect({ name: 'sidepanel' });
@@ -214,7 +254,7 @@ export default function App() {
   // Load favorites, sessions, collections, tags, requestMeta, and settings from storage
   useEffect(() => {
     chrome.storage.local.get(
-      ['favorites', 'sessions', 'darkMode', 'fontSize', 'collections', 'tags', 'requestMeta'],
+      ['favorites', 'sessions', 'darkMode', 'fontSize', 'collections', 'tags', 'requestMeta', 'qaSettings', 'contractSpecText', 'excludedQARuleIds'],
       (result: {
         favorites?: string[];
         sessions?: Array<{
@@ -228,6 +268,9 @@ export default function App() {
         collections?: RequestCollection[];
         tags?: RequestTag[];
         requestMeta?: Record<string, RequestMeta>;
+        qaSettings?: QASettings;
+        contractSpecText?: string;
+        excludedQARuleIds?: string[];
       }) => {
         if (result.favorites) setFavorites(result.favorites);
         if (result.sessions) setSessions(result.sessions);
@@ -243,6 +286,9 @@ export default function App() {
         }
         if (result.tags) setTags(result.tags);
         if (result.requestMeta) setRequestMeta(result.requestMeta);
+        if (result.qaSettings) setQASettings({ ...defaultQASettings, ...result.qaSettings });
+        if (result.contractSpecText) setContractSpecText(result.contractSpecText);
+        if (result.excludedQARuleIds) setExcludedQARuleIds(result.excludedQARuleIds);
       }
     );
   }, []);
@@ -266,6 +312,34 @@ export default function App() {
   const handleFontSizeChange = useCallback((size: FontSize) => {
     setFontSize(size);
     chrome.storage.local.set({ fontSize: size });
+  }, []);
+
+  const handleQASettingsChange = useCallback((settings: QASettings) => {
+    setQASettings(settings);
+    chrome.storage.local.set({ qaSettings: settings });
+  }, []);
+
+  const handleContractSpecChange = useCallback((text: string) => {
+    setContractSpecText(text);
+    chrome.storage.local.set({ contractSpecText: text });
+  }, []);
+
+  const handleDismissQAIssue = useCallback((issue: QAIssue) => {
+    setDismissedQAIssueIds((previous) => new Set(previous).add(issue.id));
+  }, []);
+
+  const handleExcludeQARule = useCallback((issue: QAIssue) => {
+    setExcludedQARuleIds((previous) => {
+      if (previous.includes(issue.ruleId)) return previous;
+      const next = [...previous, issue.ruleId];
+      chrome.storage.local.set({ excludedQARuleIds: next });
+      return next;
+    });
+  }, []);
+
+  const handleRestoreExcludedQARules = useCallback(() => {
+    setExcludedQARuleIds([]);
+    chrome.storage.local.set({ excludedQARuleIds: [] });
   }, []);
 
   // Load existing requests and console errors, listen for new ones
@@ -344,6 +418,7 @@ export default function App() {
           setSelectedError(null);
         }
       });
+      setDomFindings([]);
     };
 
     chrome.tabs.onActivated.addListener(handleTabChange);
@@ -390,6 +465,50 @@ export default function App() {
     clearRequests();
     clearConsoleErrors();
   }, [clearRequests, clearConsoleErrors]);
+
+  const runDomChecks = useCallback(async () => {
+    if (!qaSettings.accessibilityEnabled || !qaSettings.autoQAEnabled) return;
+    setDomChecksLoading(true);
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) return;
+      const result = await chrome.tabs.sendMessage(tab.id, { type: 'RUN_DOM_QA_CHECKS' }) as { findings?: DOMFinding[] } | undefined;
+      setDomFindings(result?.findings ?? []);
+    } catch {
+      // Browser pages and tabs without a content script cannot be scanned.
+      setDomFindings([]);
+    } finally {
+      setDomChecksLoading(false);
+    }
+  }, [qaSettings.accessibilityEnabled, qaSettings.autoQAEnabled]);
+
+  const highlightQAIssue = useCallback(async (issue: QAIssue) => {
+    const selector = issue.evidence?.selector;
+    if (typeof selector !== 'string' || !selector) return;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) return;
+      await chrome.tabs.sendMessage(tab.id, { type: 'HIGHLIGHT_ELEMENTS', elements: [{ selector }], label: issue.title });
+    } catch {
+      // The content script is unavailable on browser pages or after navigation.
+    }
+  }, []);
+
+  const exportSessionReport = useCallback((format: 'md' | 'html' | 'json') => {
+    const report = format === 'md' ? createSessionReport(requests, consoleErrors, qaIssues) : format === 'html' ? createSessionReportHtml(requests, consoleErrors, qaIssues) : createSessionReportJson(requests, consoleErrors, qaIssues);
+    const contentType = format === 'md' ? 'text/markdown' : format === 'html' ? 'text/html' : 'application/json';
+    const url = URL.createObjectURL(new Blob([report], { type: contentType }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `qa-session-report-${new Date().toISOString().slice(0, 10)}.${format}`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [requests, consoleErrors, qaIssues]);
+
+  const compareSessions = useCallback(async (leftId: string, rightId: string) => {
+    const stored = await chrome.storage.local.get([`session_${leftId}`, `session_${rightId}`]) as Record<string, ApiRequest[] | undefined>;
+    return compareEnvironments(stored[`session_${leftId}`] || [], stored[`session_${rightId}`] || []);
+  }, []);
 
   const saveMockRules = useCallback((rules: MockRule[]) => {
     setMockRules(rules);
@@ -1075,6 +1194,17 @@ export default function App() {
           >
             {t().console}
           </FilterButton>
+          <FilterButton
+            active={filter === 'qa'}
+            onClick={() => {
+              setFilter('qa');
+              void runDomChecks();
+            }}
+            count={qaIssues.length}
+            isError
+          >
+            QA-проверка
+          </FilterButton>
         </div>
 
         {/* URL Filter */}
@@ -1325,7 +1455,35 @@ export default function App() {
 
       {/* Request List or Console Errors */}
       <div className="flex-1 overflow-auto">
-        {filter === 'console' ? (
+        {filter === 'qa' ? (
+          <QACheckView
+            issues={qaIssues}
+            filter={qaFilter}
+            onFilterChange={setQaFilter}
+            onOpenRequest={(issue) => {
+              const request = requests.find((item) => item.id === issue.requestId);
+              if (request) {
+                setSelectedRequest(request);
+                setFilter('all');
+              }
+            }}
+            onHighlightIssue={(issue) => void highlightQAIssue(issue)}
+            onRefreshDomChecks={() => void runDomChecks()}
+            domChecksLoading={domChecksLoading}
+            contractSpecText={contractSpecText}
+            contractError={contractError}
+            contractCoverage={coverage}
+            onContractSpecChange={handleContractSpecChange}
+            onCreateBugReport={setBugReportIssue}
+            onDismissIssue={handleDismissQAIssue}
+            onExcludeRule={handleExcludeQARule}
+            excludedRuleCount={excludedQARuleIds.length}
+            onRestoreExcludedRules={handleRestoreExcludedQARules}
+            onExportSessionReport={exportSessionReport}
+            sessions={sessions}
+            onCompareSessions={compareSessions}
+          />
+        ) : filter === 'console' ? (
           // Console Errors List
           consoleErrors.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-[var(--color-text-muted)]">
@@ -1410,6 +1568,7 @@ export default function App() {
                   onToggleCompare={() => toggleCompareRequest(req)}
                   onToggleGroupSelect={() => toggleGroupSelect(req.id)}
                   onTogglePin={() => togglePin(req.id)}
+                  contractStatus={contractStatusByRequest.get(req.id)}
                 />
               ))}
             </div>
@@ -1440,10 +1599,25 @@ export default function App() {
                   setMockInitialRule(null)
                   setShowMockManager(true)
                 }}
+                onCreateNegativeMock={(scenario) => {
+                  const rule = createNegativeMock(selectedRequest, scenario);
+                  saveMockRules([...mockRules, rule]);
+                  setMockInitialRule(rule);
+                  setShowMockManager(true);
+                }}
                 collections={collections}
                 onAddToCollection={addRequestToCollection}
               />
             )}
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={!!bugReportIssue} onOpenChange={(open) => !open && setBugReportIssue(null)}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
+          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 h-[85vh] bg-[var(--color-surface)] rounded-t-2xl shadow-xl">
+            {bugReportIssue && <BugReportDialog issue={bugReportIssue} request={requests.find((request) => request.id === bugReportIssue.requestId)} onClose={() => setBugReportIssue(null)} />}
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
@@ -1535,6 +1709,8 @@ export default function App() {
               fontSize={fontSize}
               onDarkModeChange={handleDarkModeChange}
               onFontSizeChange={handleFontSizeChange}
+              qaSettings={qaSettings}
+              onQASettingsChange={handleQASettingsChange}
               onClose={() => setShowSettings(false)}
             />
           </Dialog.Popup>

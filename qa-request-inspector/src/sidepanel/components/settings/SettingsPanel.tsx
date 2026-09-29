@@ -1,5 +1,6 @@
 import { Settings, X, Moon, Sun, Type } from 'lucide-react'
 import { t } from '../../locales'
+import type { QASettings } from '../../qa'
 
 export type FontSize = 'small' | 'medium' | 'large'
 
@@ -9,6 +10,8 @@ interface SettingsPanelProps {
   onDarkModeChange: (enabled: boolean) => void
   onFontSizeChange: (size: FontSize) => void
   onClose: () => void
+  qaSettings: QASettings
+  onQASettingsChange: (settings: QASettings) => void
 }
 
 export function SettingsPanel({
@@ -17,6 +20,8 @@ export function SettingsPanel({
   onDarkModeChange,
   onFontSizeChange,
   onClose,
+  qaSettings,
+  onQASettingsChange,
 }: SettingsPanelProps) {
   return (
     <div className="flex flex-col h-full">
@@ -30,6 +35,17 @@ export function SettingsPanel({
         <div className="flex items-center gap-2">
           <Settings className="w-4 h-4 text-accent" />
           <span className="text-sm font-medium">{t().settingsTitle}</span>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm font-medium">QA-проверки</div>
+          {([
+            ['autoQAEnabled', 'Автоматическая QA-проверка'], ['networkErrorsEnabled', 'HTTP-ошибки'], ['slowRequestsEnabled', 'Медленные запросы'], ['largeResponsesEnabled', 'Большие ответы'], ['duplicateDetectionEnabled', 'Поиск дубликатов'], ['consoleErrorsEnabled', 'Ошибки консоли'], ['accessibilityEnabled', 'Доступность'], ['securityChecksEnabled', 'Проверки безопасности'], ['contractValidationEnabled', 'Проверка контракта'],
+          ] as Array<[keyof QASettings, string]>).map(([key, label]) => <label key={key} className="flex items-center justify-between text-xs"><span>{label}</span><input type="checkbox" checked={Boolean(qaSettings[key])} onChange={(event) => onQASettingsChange({ ...qaSettings, [key]: event.target.checked })} /></label>)}
+          <label className="block text-xs text-text-muted">Порог медленного запроса (мс)<input type="number" min="1" value={qaSettings.slowRequestThresholdMs} onChange={(event) => onQASettingsChange({ ...qaSettings, slowRequestThresholdMs: Math.max(1, Number(event.target.value) || 2000) })} className="mt-1 w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text" /></label>
+          <label className="block text-xs text-text-muted">Порог большого ответа (байт)<input type="number" min="1" value={qaSettings.largeResponseThresholdBytes} onChange={(event) => onQASettingsChange({ ...qaSettings, largeResponseThresholdBytes: Math.max(1, Number(event.target.value) || 1048576) })} className="mt-1 w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text" /></label>
+          <label className="block text-xs text-text-muted">Окно поиска дубликатов (мс)<input type="number" min="1" value={qaSettings.duplicateWindowMs} onChange={(event) => onQASettingsChange({ ...qaSettings, duplicateWindowMs: Math.max(1, Number(event.target.value) || 1000) })} className="mt-1 w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text" /></label>
+          <label className="block text-xs text-text-muted">Минимальное число дубликатов<input type="number" min="2" value={qaSettings.duplicateMinimumCount} onChange={(event) => onQASettingsChange({ ...qaSettings, duplicateMinimumCount: Math.max(2, Number(event.target.value) || 3) })} className="mt-1 w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text" /></label>
         </div>
         <button
           onClick={onClose}

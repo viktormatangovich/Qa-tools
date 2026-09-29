@@ -27,6 +27,7 @@ export interface MockRule {
   responseHeaders: Record<string, string>;
   enabled: boolean;
   delay?: number; // ms delay before responding
+  abort?: boolean; // fail the matched request (used for timeout simulation)
   description?: string;
   createdAt: number;
   updatedAt: number;

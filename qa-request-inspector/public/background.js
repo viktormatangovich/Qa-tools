@@ -494,6 +494,11 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
           mockedNetworkIds.add(params.networkId);
         }
 
+        if (matchedMock.abort) {
+          await chrome.debugger.sendCommand({ tabId }, "Fetch.failRequest", { requestId: params.requestId, errorReason: "TimedOut" });
+          return;
+        }
+
         // Build response headers
         const headers = [];
         const mockHeaders = matchedMock.responseHeaders || {};
