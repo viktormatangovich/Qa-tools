@@ -1605,6 +1605,7 @@ export default function App() {
                   setMockInitialRule(rule);
                   setShowMockManager(true);
                 }}
+                contractDocument={contractDocument}
                 collections={collections}
                 onAddToCollection={addRequestToCollection}
               />

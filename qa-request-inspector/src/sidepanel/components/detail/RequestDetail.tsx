@@ -7,7 +7,8 @@ import { TabButton, CodeCopyBlock, JsonTreeView, LoadTestPanel } from '../index'
 import { generateCurl, generateFetchCode, generateTypeScript } from '../../utils'
 import { useFieldUsage } from '../../hooks/useFieldUsage'
 import { t } from '../../locales'
-import type { NegativeScenario } from '../../qa/negativeTesting'
+import { generateNegativeTests, negativeTestTargets, responseNegativeScenarios, type NegativeScenario } from '../../qa/negativeTesting'
+import type { OpenApiDocument } from '../../qa/contract/types'
 
 interface RequestDetailProps {
   request: ApiRequest
@@ -20,6 +21,7 @@ interface RequestDetailProps {
   collections?: RequestCollection[]
   onAddToCollection?: (collectionId: string, request: ApiRequest) => void
   onCreateNegativeMock?: (scenario: NegativeScenario) => void
+  contractDocument?: OpenApiDocument | null
 }
 
 export function RequestDetail({
@@ -33,6 +35,7 @@ export function RequestDetail({
   collections = [],
   onAddToCollection,
   onCreateNegativeMock,
+  contractDocument,
 }: RequestDetailProps) {
   const [activeTab, setActiveTab] = useState('response')
   const [replaying, setReplaying] = useState(false)
@@ -54,6 +57,27 @@ export function RequestDetail({
   )
   const [editResult, setEditResult] = useState<{ status: number; body: unknown; error?: string } | null>(null)
   const [editSending, setEditSending] = useState(false)
+  const negativeTargets = negativeTestTargets(request, contractDocument || undefined)
+  const [negativeTargetId, setNegativeTargetId] = useState(negativeTargets[0]?.id || '')
+  const negativeTests = generateNegativeTests(request, negativeTargetId, contractDocument || undefined)
+
+  useEffect(() => {
+    setNegativeTargetId(negativeTestTargets(request, contractDocument || undefined)[0]?.id || '')
+  }, [request.id, contractDocument])
+
+  const applyNegativeTest = (test: { url?: string; body?: string; headerName?: string; headerValue?: string; removeHeader?: boolean }) => {
+    if (test.url) setEditUrl(test.url)
+    if (test.body !== undefined) setEditBody(test.body)
+    if (test.headerName) {
+      setEditHeaders((headers) => {
+        const index = headers.findIndex((header) => header.key.toLowerCase() === test.headerName!.toLowerCase())
+        if (test.removeHeader) return headers.filter((_, current) => current !== index)
+        if (index >= 0) return headers.map((header, current) => current === index ? { ...header, value: test.headerValue || '' } : header)
+        return [...headers, { key: test.headerName!, value: test.headerValue || '' }]
+      })
+    }
+    setActiveTab('edit')
+  }
 
   // Field usage tracking for JSON tree
   const fieldUsage = useFieldUsage(request.responseBody)
@@ -401,6 +425,7 @@ export function RequestDetail({
           <TabButton value="request" active={activeTab === 'request'}>Запрос</TabButton>
           <TabButton value="headers" active={activeTab === 'headers'}>Заголовки</TabButton>
           <TabButton value="edit" active={activeTab === 'edit'}>Правка</TabButton>
+          <TabButton value="negative" active={activeTab === 'negative'}>Негатив</TabButton>
           <TabButton value="code" active={activeTab === 'code'}>Код</TabButton>
           <TabButton value="loadtest" active={activeTab === 'loadtest'}>
             <Activity className="w-3 h-3 mr-1 inline" />
@@ -577,6 +602,36 @@ export function RequestDetail({
                   </pre>
                 </div>
               )}
+            </div>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="negative" className="p-3">
+            <div className="space-y-3">
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-semibold">Boundary &amp; Negative API Tester</h3>
+                    <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Подготовьте вариант и откройте его в «Правке»; отправка остаётся ручной.</p>
+                  </div>
+                  {contractDocument && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">OpenAPI</span>}
+                </div>
+                <label className="mt-3 block text-[10px] text-[var(--color-text-muted)]">Поле или параметр
+                  <select value={negativeTargetId} onChange={(event) => setNegativeTargetId(event.target.value)} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
+                    {negativeTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="space-y-1">
+                {negativeTests.map((test) => <article key={test.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] p-2">
+                  <div className="min-w-0 flex-1"><div className="text-xs font-medium">{test.title}</div><p className="text-[10px] text-[var(--color-text-muted)]">{test.description}</p></div>
+                  <button type="button" onClick={() => applyNegativeTest(test)} className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-accent hover:bg-[var(--color-hover)]">В правку</button>
+                </article>)}
+              </div>
+              <div className="rounded-lg border border-[var(--color-border)] p-3">
+                <h3 className="text-xs font-semibold">Сценарии ответа (мок)</h3>
+                <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Создадут локальное правило мока для этого URL.</p>
+                <div className="mt-2 flex flex-wrap gap-1">{responseNegativeScenarios.map((scenario) => <button key={scenario} type="button" disabled={!onCreateNegativeMock} onClick={() => onCreateNegativeMock?.(scenario)} className="rounded border border-[var(--color-border)] px-2 py-1 text-[10px] hover:bg-[var(--color-hover)] disabled:opacity-40">{scenario}</button>)}</div>
+              </div>
             </div>
           </Tabs.Panel>
 
