@@ -55,7 +55,7 @@ export function DiffDialog({
     <Dialog.Root open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-        <Dialog.Popup className="fixed inset-4 z-50 bg-surface rounded-xl flex flex-col shadow-xl overflow-hidden">
+        <Dialog.Popup className="diff-dialog fixed inset-4 z-50 bg-surface rounded-xl flex flex-col shadow-xl overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
@@ -103,10 +103,10 @@ export function DiffDialog({
           </div>
 
           {/* Diff View */}
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 min-h-0 min-w-0 overflow-auto">
             <div className="flex min-h-full">
               {/* Left side */}
-              <div className="flex-1 border-r border-border overflow-auto">
+              <div className="flex-1 min-w-0 border-r border-border overflow-auto">
                 <pre className="p-3 text-xs font-mono">
                   {diffResult.map((line, i) => (
                     <div
@@ -121,7 +121,7 @@ export function DiffDialog({
               </div>
 
               {/* Right side */}
-              <div className="flex-1 overflow-auto">
+              <div className="flex-1 min-h-0 min-w-0 overflow-auto">
                 <pre className="p-3 text-xs font-mono">
                   {diffResult.map((line, i) => (
                     <div

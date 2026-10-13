@@ -29,3 +29,6 @@ api-debugger.zip
 # Screenshots
 public/screenshot.png
 public/image*.png
+
+# Isolated QA browser profiles
+.qa-browser-profile*/

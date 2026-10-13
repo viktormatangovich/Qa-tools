@@ -55,6 +55,73 @@ html.dark {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
+  min-width: 0;
+}
+
+.app-shell {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-wrap: anywhere;
+}
+
+/* A definite viewport height lets every nested page scroll instead of growing
+   beyond the bottom sheet. The page itself also scrolls on very short screens. */
+.panel-dialog {
+  height: 90vh;
+  height: 90dvh;
+  max-height: calc(100dvh - 8px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.panel-page {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+:where(.app-shell, .panel-dialog, .diff-dialog) :where(.flex, .grid) > * {
+  min-width: 0;
+}
+
+:where(.panel-page, .diff-dialog) :where(.overflow-auto, .overflow-y-auto) {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.panel-page > :not(.flex-1) {
+  flex-shrink: 0;
+}
+
+.panel-page footer {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .panel-page > .justify-between {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .panel-page .grid-cols-2,
+  .panel-page .grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .diff-dialog {
+    inset: 4px;
+  }
+
+  .diff-dialog > .justify-between {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 }
 
 /* Geometric decoration */
@@ -66,6 +133,6 @@ html.dark {
 
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }

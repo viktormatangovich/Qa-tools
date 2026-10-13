@@ -351,6 +351,26 @@ class DOMQAChecker {
       if (!text && !this.hasAccessibleName(button)) add('button-without-accessible-name', button);
     });
 
+    document.querySelectorAll('[tabindex]').forEach(element => {
+      if (this.isVisible(element) && element.tabIndex > 0) add('positive-tabindex', element);
+    });
+    document.querySelectorAll('[role="button"], [onclick]').forEach(element => {
+      if (this.isVisible(element) && !element.matches('button, a[href], input, select, textarea') && element.tabIndex < 0) add('clickable-without-keyboard', element);
+    });
+    // Conservative contrast check: direct text, opaque solid background only.
+    const rgb = text => { const match = text.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/); return match && (match[4] === undefined || Number(match[4]) === 1) ? match.slice(1,4).map(Number) : null; };
+    const luminance = channels => channels.map(v => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126,0.7152,0.0722][i], 0);
+    [...document.querySelectorAll('p, span, a, label, button, h1, h2, h3')].slice(0, 2000).forEach(element => {
+      if (!this.isVisible(element) || ![...element.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) return;
+      const style = getComputedStyle(element);
+      if (Number(style.opacity) !== 1 || style.backgroundImage !== 'none') return;
+      const fg = rgb(style.color), bg = rgb(style.backgroundColor);
+      if (!fg || !bg) return;
+      const a = luminance(fg), b = luminance(bg), contrast = (Math.max(a,b) + 0.05) / (Math.min(a,b) + 0.05);
+      const large = parseFloat(style.fontSize) >= 24 || (parseFloat(style.fontSize) >= 18.66 && Number(style.fontWeight) >= 700);
+      if (contrast < (large ? 3 : 4.5)) add('low-contrast', element);
+    });
+
     return { findings };
   }
 }

@@ -28,7 +28,7 @@ ${error.stack}
 \`\`\`
 ` : ''}
 ---
-Please help me debug this error. What could be causing it and how can I fix it?
+Помоги разобраться с ошибкой: что её вызвало и как её исправить?
 `
     await navigator.clipboard.writeText(text)
     setCopied(true)
@@ -36,7 +36,7 @@ Please help me debug this error. What could be causing it and how can I fix it?
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="panel-page flex flex-col h-full">
       {/* Drag Handle */}
       <div className="flex justify-center pt-3 pb-2">
         <div className="w-10 h-1 rounded-full bg-border" />

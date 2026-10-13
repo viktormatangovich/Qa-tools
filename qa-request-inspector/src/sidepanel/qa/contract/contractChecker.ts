@@ -1,12 +1,14 @@
+import { parse as parseYaml } from "yaml";
 import type { ApiRequest } from "../../types";
 import type { QAIssue } from "../core/types";
 import type { ContractViolation, MatchedEndpoint, OpenApiDocument, OpenApiOperation, OpenApiSchema } from "./types";
 
 export function parseOpenApiSpec(text: string): OpenApiDocument {
-  const value: unknown = JSON.parse(text);
-  if (!value || typeof value !== "object" || !("paths" in value)) throw new Error("Ожидается OpenAPI JSON-документ с paths.");
+  const value: unknown = /^\s*[\[{]/.test(text) ? JSON.parse(text) : parseYaml(text, { maxAliasCount: 50 });
+  if (!value || typeof value !== "object" || !("paths" in value)) throw new Error("Ожидается OpenAPI-документ с paths.");
   const document = value as OpenApiDocument;
-  if (!document.openapi?.startsWith("3.")) throw new Error("Поддерживается только OpenAPI 3.x JSON.");
+  if (typeof document.openapi !== "string" || !document.openapi.startsWith("3.")) throw new Error("Поддерживается только OpenAPI 3.x JSON/YAML.");
+  if (!document.paths || typeof document.paths !== "object" || Array.isArray(document.paths)) throw new Error("paths должен быть объектом.");
   return document;
 }
 
@@ -32,7 +34,7 @@ export async function loadOpenApiSpecFromUrl(urlText: string, request: typeof fe
   try {
     parseOpenApiSpec(text);
   } catch (error) {
-    throw new Error(`Загруженный документ не является поддерживаемой OpenAPI 3.x JSON-спецификацией: ${(error as Error).message}`);
+    throw new Error(`Загруженный документ не является поддерживаемой OpenAPI 3.x JSON/YAML-спецификацией: ${(error as Error).message}`);
   }
   return text;
 }
@@ -41,6 +43,7 @@ export function matchEndpoint(document: OpenApiDocument, request: ApiRequest): M
   const url = new URL(request.url);
   for (const [pathTemplate, pathItem] of Object.entries(document.paths)) {
     const expression = new RegExp(`^${pathTemplate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\{[^}]+\\\}/g, "[^/]+")}$`);
+    if (!pathItem || typeof pathItem !== "object") continue;
     const operation = pathItem[request.method.toLowerCase()];
     if (operation && expression.test(url.pathname)) return { pathTemplate, operation };
   }
@@ -66,32 +69,32 @@ function validateSchema(value: unknown, schemaInput: OpenApiSchema | undefined, 
   const schema = dereference(schemaInput, document);
   if (!schema) return;
   if (value === null) {
-    if (!schema.nullable) violations.push({ location, path, message: "Value must not be null.", expected: schema.type, actual: "null" });
+    if (!schema.nullable) violations.push({ location, path, message: "Значение не должно быть null.", expected: schema.type, actual: "null" });
     return;
   }
-  if (schema.type && valueType(value) !== schema.type) {
+  if (schema.type && valueType(value) !== schema.type && !(schema.type === "number" && typeof value === "number")) {
     violations.push({ location, path, message: "Неожиданный тип значения.", expected: schema.type, actual: valueType(value) });
     return;
   }
   if (schema.enum && !schema.enum.some((allowed) => JSON.stringify(allowed) === JSON.stringify(value))) violations.push({ location, path, message: "Значение отсутствует в документированном enum." });
   if (typeof value === "number") {
-    if (schema.minimum !== undefined && value < schema.minimum) violations.push({ location, path, message: "Value is below minimum.", expected: String(schema.minimum), actual: String(value) });
-    if (schema.maximum !== undefined && value > schema.maximum) violations.push({ location, path, message: "Value is above maximum.", expected: String(schema.maximum), actual: String(value) });
+    if (schema.minimum !== undefined && value < schema.minimum) violations.push({ location, path, message: "Значение меньше minimum.", expected: String(schema.minimum), actual: String(value) });
+    if (schema.maximum !== undefined && value > schema.maximum) violations.push({ location, path, message: "Значение больше maximum.", expected: String(schema.maximum), actual: String(value) });
   }
   if (typeof value === "string") {
-    if (schema.minLength !== undefined && value.length < schema.minLength) violations.push({ location, path, message: "String is shorter than minLength.", expected: String(schema.minLength), actual: String(value.length) });
-    if (schema.maxLength !== undefined && value.length > schema.maxLength) violations.push({ location, path, message: "String is longer than maxLength.", expected: String(schema.maxLength), actual: String(value.length) });
+    if (schema.minLength !== undefined && value.length < schema.minLength) violations.push({ location, path, message: "Строка короче minLength.", expected: String(schema.minLength), actual: String(value.length) });
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) violations.push({ location, path, message: "Строка длиннее maxLength.", expected: String(schema.maxLength), actual: String(value.length) });
   }
   if (Array.isArray(value)) {
-    if (schema.minItems !== undefined && value.length < schema.minItems) violations.push({ location, path, message: "Array is shorter than minItems." });
-    if (schema.maxItems !== undefined && value.length > schema.maxItems) violations.push({ location, path, message: "Array is longer than maxItems." });
+    if (schema.minItems !== undefined && value.length < schema.minItems) violations.push({ location, path, message: "Массив короче minItems." });
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) violations.push({ location, path, message: "Массив длиннее maxItems." });
     value.forEach((item, index) => validateSchema(item, schema.items, document, `${path}[${index}]`, violations, location, depth + 1));
   }
   if (typeof value === "object" && !Array.isArray(value)) {
     const object = value as Record<string, unknown>;
     for (const key of schema.required || []) if (!(key in object)) violations.push({ location, path: `${path}.${key}`, message: "Отсутствует обязательное свойство." });
     for (const [key, childSchema] of Object.entries(schema.properties || {})) if (key in object) validateSchema(object[key], childSchema, document, `${path}.${key}`, violations, location, depth + 1);
-    if (schema.additionalProperties === false) for (const key of Object.keys(object)) if (!schema.properties?.[key]) violations.push({ location, path: `${path}.${key}`, message: "Additional property is not allowed." });
+    if (schema.additionalProperties === false) for (const key of Object.keys(object)) if (!schema.properties?.[key]) violations.push({ location, path: `${path}.${key}`, message: "Дополнительное свойство запрещено." });
   }
 }
 
@@ -154,9 +157,23 @@ export function contractIssues(document: OpenApiDocument, requests: ApiRequest[]
 }
 
 export function contractCoverage(document: OpenApiDocument, requests: ApiRequest[]): { total: number; exercised: number; validated: number; passed: number; failed: number } {
-  const endpointKeys = Object.entries(document.paths).flatMap(([path, operations]) => Object.keys(operations).map((method) => `${method.toUpperCase()} ${path}`));
+  const endpointKeys = Object.entries(document.paths).flatMap(([path, operations]) => Object.keys(operations).filter(method => ["get", "post", "put", "patch", "delete", "head", "options", "trace"].includes(method)).map((method) => `${method.toUpperCase()} ${path}`));
   const matched = requests.map((request) => ({ request, endpoint: matchEndpoint(document, request) })).filter((item) => item.endpoint);
   const exercised = new Set(matched.map(({ request, endpoint }) => `${request.method} ${endpoint!.pathTemplate}`)).size;
   const failures = matched.filter(({ request }) => validateResponse(document, request).length + validateRequest(document, request).length > 0).length;
   return { total: endpointKeys.length, exercised, validated: matched.length, passed: matched.length - failures, failed: failures };
+}
+
+export function unsupportedContractFeatures(document: OpenApiDocument): string[] {
+  const warnings = new Set<string>();
+  const visit = (value: unknown, path: string) => {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, item] of Object.entries(value)) {
+      if (['oneOf','anyOf','allOf','not','pattern','format','discriminator','exclusiveMinimum','exclusiveMaximum','uniqueItems','contains','if','then','else'].includes(key)) warnings.add(path + '.' + key + ': проверка не поддерживается');
+      if (key === 'type' && Array.isArray(item)) warnings.add(path + ': объединение типов не поддерживается');
+      if (key === '$ref' && typeof item === 'string' && !item.startsWith('#/components/schemas/')) warnings.add(path + ': ссылка не поддерживается');
+      visit(item, path + '.' + key);
+    }
+  };
+  visit(document, '$'); return [...warnings];
 }

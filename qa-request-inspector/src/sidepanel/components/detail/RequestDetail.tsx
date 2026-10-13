@@ -225,7 +225,7 @@ export function RequestDetail({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="panel-page flex flex-col h-full">
       {/* Drag Handle */}
       <div className="flex justify-center pt-3 pb-2">
         <div className="w-10 h-1 rounded-full bg-border" />
@@ -420,7 +420,7 @@ export function RequestDetail({
 
       {/* Tabs */}
       <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <Tabs.List className="flex border-b border-border shrink-0">
+        <Tabs.List className="flex border-b border-border shrink-0 overflow-x-auto">
           <TabButton value="response" active={activeTab === 'response'}>Ответ</TabButton>
           <TabButton value="request" active={activeTab === 'request'}>Запрос</TabButton>
           <TabButton value="headers" active={activeTab === 'headers'}>Заголовки</TabButton>

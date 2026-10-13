@@ -29,6 +29,8 @@ export interface MockRule {
   delay?: number; // ms delay before responding
   abort?: boolean; // fail the matched request (used for timeout simulation)
   description?: string;
+  sequence?: Array<{ status: number; responseBody: string; delay?: number; abort?: boolean }>;
+  sequenceEnd?: "repeat" | "last" | "passthrough";
   createdAt: number;
   updatedAt: number;
 }

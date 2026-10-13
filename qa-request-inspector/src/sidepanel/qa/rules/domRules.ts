@@ -2,6 +2,9 @@ import type { QAAnalysisInput } from "../core/rulesEngine";
 import type { QARule } from "../core/types";
 
 const domRuleMetadata = {
+  "positive-tabindex": { category: "accessibility" as const, severity: "warning" as const, title: "Нестандартный порядок фокуса", description: "Положительный tabindex меняет естественный порядок клавиатурной навигации." },
+  "clickable-without-keyboard": { category: "accessibility" as const, severity: "warning" as const, title: "Элемент недоступен с клавиатуры", description: "Элемент с ролью кнопки или обработчиком клика не включён в порядок фокуса." },
+  "low-contrast": { category: "accessibility" as const, severity: "warning" as const, title: "Низкий контраст текста", description: "Контраст текста на сплошном непрозрачном фоне ниже порога WCAG AA. Проверьте визуально." },
   "broken-image": { category: "dom" as const, severity: "warning" as const, title: "Не загрузилось изображение", description: "Загрузка изображения завершилась без доступных данных." },
   "missing-alt": { category: "accessibility" as const, severity: "warning" as const, title: "У изображения нет alt", description: "У изображения нет атрибута alt, и оно не помечено как декоративное." },
   "input-without-label": { category: "accessibility" as const, severity: "warning" as const, title: "У поля нет доступного имени", description: "У элемента формы нет связанной метки или ARIA-имени." },

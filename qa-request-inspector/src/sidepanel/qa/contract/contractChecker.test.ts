@@ -27,7 +27,7 @@ test("reports schema violations with JSON paths", () => {
 });
 test("calculates API Contract Coverage from exercised endpoints", () => assert.deepEqual(contractCoverage(spec, [request]), { total: 1, exercised: 1, validated: 1, passed: 0, failed: 1 }));
 test("creates deterministic boundary suggestions without sending requests", () => assert.deepEqual(contractTestSuggestions({ type: "integer", minimum: 18, maximum: 20 }), [17, 18, 19, 20, 21, null, "0"]));
-test("finds removed endpoints as breaking contract changes", () => assert.match(diffOpenApi(spec, parseOpenApiSpec('{"openapi":"3.0.3","paths":{}}'))[0]?.message || "", /Endpoint removed/));
+test("finds removed endpoints as breaking contract changes", () => assert.match(diffOpenApi(spec, parseOpenApiSpec('{"openapi":"3.0.3","paths":{}}'))[0]?.message || "", /Удалён маршрут/));
 test("validates required query parameters and request body schema", () => {
   const requestSpec = parseOpenApiSpec('{"openapi":"3.0.3","paths":{"/orders":{"post":{"parameters":[{"name":"quantity","in":"query","required":true,"schema":{"type":"integer"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["name"]}}}},"responses":{"200":{}}}}}}');
   const invalidRequest = { ...request, method: "POST", url: "https://example.test/orders?quantity=wrong", requestBody: "{}" };

@@ -3,7 +3,7 @@ import { formatBytes, getPayloadSize } from './helpers'
 
 export function formatJsonForExport(data: unknown): string {
   try {
-    if (data === null || data === undefined) return '(empty)'
+    if (data === null || data === undefined) return '(пусто)'
     if (typeof data === 'string') {
       try {
         return JSON.stringify(JSON.parse(data), null, 2)
@@ -20,22 +20,22 @@ export function formatJsonForExport(data: unknown): string {
 export function generateClaudePrompt(req: ApiRequest): string {
   const isError = req.status >= 400 || req.error
 
-  let prompt = `## API ${isError ? 'Error' : 'Request'} Debug Report
+  let prompt = `## ${isError ? 'Отчёт об ошибке API' : 'Отчёт о запросе API'}
 
-**Endpoint:** \`${req.method} ${req.url}\`
-**Status:** ${req.status} ${req.statusText}
-**Duration:** ${(req.duration / 1000).toFixed(2)}s
-**Type:** ${req.type.toUpperCase()}
-${req.error ? `**Error:** ${req.error}` : ''}
+**Маршрут:** \`${req.method} ${req.url}\`
+**Статус:** ${req.status} ${req.statusText}
+**Длительность:** ${(req.duration / 1000).toFixed(2)}s
+**Тип:** ${req.type.toUpperCase()}
+${req.error ? `**Ошибка:** ${req.error}` : ''}
 
-### Page Context
+### Контекст страницы
 - **URL:** ${req.pageUrl}
-- **Title:** ${req.pageTitle}
+- **Заголовок:** ${req.pageTitle}
 
 `
 
   if (req.requestBody) {
-    prompt += `### Request Body
+    prompt += `### Тело запроса
 \`\`\`json
 ${formatJsonForExport(req.requestBody)}
 \`\`\`
@@ -44,7 +44,7 @@ ${formatJsonForExport(req.requestBody)}
   }
 
   if (req.requestHeaders && Object.keys(req.requestHeaders).length > 0) {
-    prompt += `### Request Headers
+    prompt += `### Заголовки запроса
 \`\`\`
 ${Object.entries(req.requestHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 \`\`\`
@@ -52,7 +52,7 @@ ${Object.entries(req.requestHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 `
   }
 
-  prompt += `### Response Body
+  prompt += `### Тело ответа
 \`\`\`json
 ${formatJsonForExport(req.responseBody)}
 \`\`\`
@@ -60,7 +60,7 @@ ${formatJsonForExport(req.responseBody)}
 `
 
   if (req.responseHeaders && Object.keys(req.responseHeaders).length > 0) {
-    prompt += `### Response Headers
+    prompt += `### Заголовки ответа
 \`\`\`
 ${Object.entries(req.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 \`\`\`
@@ -69,10 +69,10 @@ ${Object.entries(req.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
   }
 
   prompt += `---
-Please help me ${isError ? 'debug this API error' : 'understand this API response'}. ${
+Помоги ${isError ? 'разобраться с ошибкой API' : 'проанализировать ответ API'}. ${
   isError
-    ? 'What could be causing this issue and how can I fix it?'
-    : 'Is there anything unusual or concerning about this request/response?'
+    ? 'Что могло вызвать проблему и как её исправить?'
+    : 'Есть ли проблемы в этом запросе или ответе?'
 }
 `
 
@@ -180,9 +180,9 @@ export function generateHar(requests: ApiRequest[]) {
 export function generatePostmanCollection(requests: ApiRequest[]) {
   return {
     info: {
-      name: `Reqpane Export - ${new Date().toISOString().slice(0, 10)}`,
+      name: `Экспорт QA Tools - ${new Date().toISOString().slice(0, 10)}`,
       schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
-      description: 'Exported from Reqpane Chrome Extension',
+      description: 'Экспорт из расширения QA Tools',
     },
     item: requests.map(req => {
       const urlParts = (() => {
@@ -248,13 +248,13 @@ export function generatePostmanCollection(requests: ApiRequest[]) {
 
 export function generateTypeScript(req: ApiRequest): string {
   const data = req.responseBody
-  if (!data) return '// No response body to generate types from'
+  if (!data) return '// Нет тела ответа для генерации типов'
 
   let parsed: unknown
   try {
     parsed = typeof data === 'string' ? JSON.parse(data) : data
   } catch {
-    return '// Cannot generate types: response is not valid JSON'
+    return '// Нельзя создать типы: ответ содержит некорректный JSON'
   }
 
   function inferType(value: unknown, name: string, indent = ''): string {
@@ -296,7 +296,7 @@ export function generateTypeScript(req: ApiRequest): string {
     const typeBody = inferType(parsed, 'Response', '')
     return `interface ApiResponse ${typeBody}`
   } catch {
-    return '// Could not generate types from response'
+    return '// Не удалось создать типы из ответа'
   }
 }
 
@@ -365,37 +365,37 @@ export function generateMarkdownReport(
   const now = new Date()
   const timestamp = now.toLocaleString()
 
-  let report = `# API Debug Report
+  let report = `# Отчёт по API
 
-**Generated:** ${timestamp}
-**Page:** ${pageInfo.title || 'Unknown'}
-**URL:** ${pageInfo.url || 'Unknown'}
+**Сформирован:** ${timestamp}
+**Страница:** ${pageInfo.title || 'Недоступно'}
+**URL:** ${pageInfo.url || 'Недоступно'}
 
 ---
 
-## Summary
+## Сводка
 
-| Metric | Value |
+| Показатель | Значение |
 |--------|-------|
-| Total Requests | ${stats.total} |
-| Successful (2xx) | ${stats.successful} |
-| Client Errors (4xx) | ${stats.clientErrors} |
-| Server Errors (5xx) | ${stats.serverErrors} |
-| Network Errors | ${stats.networkErrors} |
-| Success Rate | ${stats.successRate.toFixed(1)}% |
-| Avg Response Time | ${Math.round(stats.avgTime)}ms |
-| Min Response Time | ${Math.round(stats.minTime)}ms |
-| Max Response Time | ${Math.round(stats.maxTime)}ms |
-| Total Data Transferred | ${formatBytes(stats.totalSize)} |
+| Всего запросов | ${stats.total} |
+| Успешные (2xx) | ${stats.successful} |
+| Ошибки клиента (4xx) | ${stats.clientErrors} |
+| Ошибки сервера (5xx) | ${stats.serverErrors} |
+| Сетевые ошибки | ${stats.networkErrors} |
+| Доля успешных | ${stats.successRate.toFixed(1)}% |
+| Среднее время ответа | ${Math.round(stats.avgTime)}ms |
+| Минимальное время ответа | ${Math.round(stats.minTime)}ms |
+| Максимальное время ответа | ${Math.round(stats.maxTime)}ms |
+| Объём данных | ${formatBytes(stats.totalSize)} |
 
 `
 
   // Status code distribution
   const statusCodes = Object.keys(stats.statusDistribution).map(Number).sort((a, b) => a - b)
   if (statusCodes.length > 0) {
-    report += `### Status Code Distribution
+    report += `### Распределение статусов
 
-| Status | Count |
+| Статус | Количество |
 |--------|-------|
 `
     statusCodes.forEach(status => {
@@ -406,9 +406,9 @@ export function generateMarkdownReport(
 
   // Slowest requests
   if (stats.slowRequests.length > 0) {
-    report += `### Slowest Requests (>500ms)
+    report += `### Медленные запросы (>500 мс)
 
-| URL | Method | Duration | Status |
+| URL | Метод | Время | Статус |
 |-----|--------|----------|--------|
 `
     stats.slowRequests.slice(0, 10).forEach(req => {
@@ -427,7 +427,7 @@ export function generateMarkdownReport(
   if (failedRequests.length > 0) {
     report += `---
 
-## Failed Requests (${failedRequests.length})
+## Неуспешные запросы (${failedRequests.length})
 
 `
     failedRequests.forEach((req, i) => {
@@ -438,14 +438,14 @@ export function generateMarkdownReport(
 
       report += `### ${i + 1}. ${req.method} ${pathname}
 
-- **Status:** ${req.status} ${req.statusText || ''}
-- **Duration:** ${req.duration}ms
-- **Time:** ${new Date(req.timestamp).toLocaleTimeString()}
-${req.error ? `- **Error:** ${req.error}` : ''}
+- **Статус:** ${req.status} ${req.statusText || ''}
+- **Длительность:** ${req.duration}ms
+- **Время:** ${new Date(req.timestamp).toLocaleTimeString()}
+${req.error ? `- **Ошибка:** ${req.error}` : ''}
 
 `
       if (req.responseBody) {
-        report += `**Response:**
+        report += `**Ответ:**
 \`\`\`json
 ${formatJsonForExport(req.responseBody)}
 \`\`\`
@@ -458,7 +458,7 @@ ${formatJsonForExport(req.responseBody)}
   // All requests
   report += `---
 
-## All Requests (${requests.length})
+## Все запросы (${requests.length})
 
 `
   requests.forEach(req => {
@@ -469,14 +469,14 @@ ${formatJsonForExport(req.responseBody)}
 
     report += `### ${req.method} ${pathname}
 
-- **Status:** ${req.status} ${req.statusText || ''}
-- **Duration:** ${req.duration}ms
-- **Time:** ${new Date(req.timestamp).toLocaleTimeString()}
+- **Статус:** ${req.status} ${req.statusText || ''}
+- **Длительность:** ${req.duration}ms
+- **Время:** ${new Date(req.timestamp).toLocaleTimeString()}
 
 `
 
     if (req.requestHeaders && Object.keys(req.requestHeaders).length > 0) {
-      report += `**Request Headers:**
+      report += `**Заголовки запроса:**
 \`\`\`
 ${Object.entries(req.requestHeaders).map(([k, v]) => {
   // Mask sensitive headers
@@ -491,7 +491,7 @@ ${Object.entries(req.requestHeaders).map(([k, v]) => {
     }
 
     if (req.requestBody) {
-      report += `**Request Body:**
+      report += `**Тело запроса:**
 \`\`\`json
 ${formatJsonForExport(req.requestBody)}
 \`\`\`
@@ -500,7 +500,7 @@ ${formatJsonForExport(req.requestBody)}
     }
 
     if (req.responseHeaders && Object.keys(req.responseHeaders).length > 0) {
-      report += `**Response Headers:**
+      report += `**Заголовки ответа:**
 \`\`\`
 ${Object.entries(req.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 \`\`\`
@@ -510,8 +510,8 @@ ${Object.entries(req.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 
     if (req.responseBody) {
       const bodyStr = formatJsonForExport(req.responseBody)
-      const truncated = bodyStr.length > 2000 ? bodyStr.slice(0, 2000) + '\n... (truncated)' : bodyStr
-      report += `**Response Body:**
+      const truncated = bodyStr.length > 2000 ? bodyStr.slice(0, 2000) + '\n... (сокращено)' : bodyStr
+      report += `**Тело ответа:**
 \`\`\`json
 ${truncated}
 \`\`\`
@@ -520,23 +520,23 @@ ${truncated}
     }
   })
 
-  // Console errors
+  // Ошибки консоли
   if (consoleErrors.length > 0) {
     report += `---
 
-## Console Errors (${consoleErrors.length})
+## Ошибки консоли (${consoleErrors.length})
 
 `
     consoleErrors.forEach((err, i) => {
       report += `### ${i + 1}. ${err.message.slice(0, 100)}${err.message.length > 100 ? '...' : ''}
 
-- **Type:** ${err.type}
-${err.filename ? `- **File:** ${err.filename}${err.lineno ? `:${err.lineno}` : ''}${err.colno ? `:${err.colno}` : ''}` : ''}
-- **Time:** ${new Date(err.timestamp).toLocaleTimeString()}
+- **Тип:** ${err.type}
+${err.filename ? `- **Файл:** ${err.filename}${err.lineno ? `:${err.lineno}` : ''}${err.colno ? `:${err.colno}` : ''}` : ''}
+- **Время:** ${new Date(err.timestamp).toLocaleTimeString()}
 
 `
       if (err.stack) {
-        report += `**Stack Trace:**
+        report += `**Стек вызовов:**
 \`\`\`
 ${err.stack}
 \`\`\`
@@ -548,7 +548,7 @@ ${err.stack}
 
   report += `---
 
-*Report generated by Reqpane Chrome Extension*
+*Отчёт сформирован расширением QA Tools*
 `
 
   return report

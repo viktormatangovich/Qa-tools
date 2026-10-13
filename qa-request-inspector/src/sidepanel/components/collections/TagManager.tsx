@@ -32,7 +32,7 @@ export function TagManager({
   }, [newName, newColor, onCreate])
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="panel-page flex flex-col h-full">
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-[var(--color-border)]">
         <div className="flex items-center gap-2">
           <Tag className="w-4 h-4 text-[var(--color-accent)]" />

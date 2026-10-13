@@ -61,6 +61,8 @@ import { contractCoverage, contractIssues, matchEndpoint, parseOpenApiSpec } fro
 import { createSessionReport, createSessionReportHtml, createSessionReportJson } from './qa/report';
 import { createNegativeMock } from './qa/negativeTesting';
 import { compareEnvironments } from './qa/environmentCompare';
+import { retainedSessions } from './qa/teamTools';
+import { TeamToolsPanel } from './components/qa/TeamToolsPanel';
 import type { OpenApiDocument } from './qa/contract/types';
 import {
   generateClaudePrompt,
@@ -273,7 +275,7 @@ export default function App() {
         excludedQARuleIds?: string[];
       }) => {
         if (result.favorites) setFavorites(result.favorites);
-        if (result.sessions) setSessions(result.sessions);
+        if (result.sessions) setSessions(retainedSessions(result.sessions));
         if (result.darkMode !== undefined) setDarkMode(result.darkMode);
         if (result.fontSize) setFontSize(result.fontSize);
         if (result.collections) {
@@ -360,6 +362,7 @@ export default function App() {
 
     // Listen for new requests, errors, and debugger status
     const handleMessage = (message: Record<string, unknown>) => {
+      if (message.type === 'SESSION_HISTORY_CHANGED') setSessions(message.payload as import('./types').Session[]);
       if (message.type === 'NEW_API_REQUEST') {
         setRequests((prev) =>
           [message.payload as ApiRequest, ...prev].slice(0, 100)
@@ -507,7 +510,8 @@ export default function App() {
 
   const compareSessions = useCallback(async (leftId: string, rightId: string) => {
     const stored = await chrome.storage.local.get([`session_${leftId}`, `session_${rightId}`]) as Record<string, ApiRequest[] | undefined>;
-    return compareEnvironments(stored[`session_${leftId}`] || [], stored[`session_${rightId}`] || []);
+    const options = await chrome.storage.local.get("teamWorkspace") as { teamWorkspace?: { compareOptions: import("./qa/environmentCompare").CompareOptions } };
+    return compareEnvironments(stored[`session_${leftId}`] || [], stored[`session_${rightId}`] || [], options.teamWorkspace?.compareOptions);
   }, []);
 
   const saveMockRules = useCallback((rules: MockRule[]) => {
@@ -552,11 +556,11 @@ export default function App() {
   }, []);
 
   // Save current session
-  const saveSession = useCallback(() => {
+  const saveSession = useCallback(async () => {
     if (requests.length === 0) return;
 
     const sessionId = crypto.randomUUID();
-    const sessionName = `Session ${new Date().toLocaleString()}`;
+    const sessionName = `Сессия ${new Date().toLocaleString("ru-RU")}`;
     const newSession = {
       id: sessionId,
       name: sessionName,
@@ -566,15 +570,14 @@ export default function App() {
 
     // Save session metadata, evict oldest if over 20
     const allSessions = [newSession, ...sessions];
-    const newSessions = allSessions.slice(0, 20);
-    const evicted = allSessions.slice(20);
-    setSessions(newSessions);
-
-    // Save session data
-    chrome.storage.local.set({
+    const newSessions = retainedSessions(allSessions);
+    const evicted = allSessions.filter(s => !newSessions.some(item => item.id === s.id));
+    // Save session data before updating the visible list.
+    try { await chrome.storage.local.set({
       sessions: newSessions,
       [`session_${sessionId}`]: requests,
-    });
+    }); } catch { window.alert("Не удалось сохранить сессию: недостаточно места в хранилище расширения."); return; }
+    setSessions(newSessions);
 
     // Clean up orphaned session data
     if (evicted.length > 0) {
@@ -995,10 +998,10 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="app-shell flex flex-col">
       {/* Header */}
       <header className="px-4 pt-5 pb-4 border-b border-[var(--color-border)]">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-[var(--color-accent)] rounded-lg flex items-center justify-center">
               <Terminal className="w-4 h-4 text-white" strokeWidth={2} />
@@ -1017,7 +1020,7 @@ export default function App() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <button
               onClick={() => setShowBreakpointManager(true)}
               className={`p-1.5 rounded transition-colors ${breakpointRules.some((r) => r.enabled)
@@ -1164,7 +1167,7 @@ export default function App() {
         </div>
 
         {/* Filter tabs */}
-        <div className="flex gap-1 p-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+        <div className="flex flex-wrap gap-1 p-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
           <FilterButton
             active={filter === 'all'}
             onClick={() => setFilter('all')}
@@ -1248,7 +1251,7 @@ export default function App() {
         </div>
 
         {/* View Mode, Sort & Compare */}
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
           <div className="flex gap-1 p-0.5 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)]">
             <button
               onClick={() => setViewMode('list')}
@@ -1281,7 +1284,7 @@ export default function App() {
               <FolderOpen className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <select
               value={sortBy}
               onChange={(e) => {
@@ -1456,6 +1459,11 @@ export default function App() {
       {/* Request List or Console Errors */}
       <div className="flex-1 overflow-auto">
         {filter === 'qa' ? (
+          <><TeamToolsPanel requests={requests} settings={qaSettings} contractSpecText={contractSpecText} excludedRuleIds={excludedQARuleIds} mockRules={mockRules} onSaveMocks={saveMockRules} onApplyProfile={profile => {
+            handleQASettingsChange(profile.qaSettings); handleContractSpecChange(profile.contractSpecText);
+            setExcludedQARuleIds(profile.excludedRuleIds); void chrome.storage.local.set({ excludedQARuleIds: profile.excludedRuleIds });
+            saveMockRules(profile.mockRules);
+          }} />
           <QACheckView
             issues={qaIssues}
             filter={qaFilter}
@@ -1482,7 +1490,7 @@ export default function App() {
             onExportSessionReport={exportSessionReport}
             sessions={sessions}
             onCompareSessions={compareSessions}
-          />
+          /></>
         ) : filter === 'console' ? (
           // Console Errors List
           consoleErrors.length === 0 ? (
@@ -1582,7 +1590,7 @@ export default function App() {
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[85vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
             {selectedRequest && (
               <RequestDetail
                 request={selectedRequest}
@@ -1617,7 +1625,7 @@ export default function App() {
       <Dialog.Root open={!!bugReportIssue} onOpenChange={(open) => !open && setBugReportIssue(null)}>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 h-[85vh] bg-[var(--color-surface)] rounded-t-2xl shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl shadow-xl">
             {bugReportIssue && <BugReportDialog issue={bugReportIssue} request={requests.find((request) => request.id === bugReportIssue.requestId)} onClose={() => setBugReportIssue(null)} />}
           </Dialog.Popup>
         </Dialog.Portal>
@@ -1630,7 +1638,7 @@ export default function App() {
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[85vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
             {selectedError && (
               <ConsoleErrorDetail
                 error={selectedError}
@@ -1651,7 +1659,7 @@ export default function App() {
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[90vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
             <MockManager
               rules={mockRules}
               onSave={saveMockRules}
@@ -1672,7 +1680,7 @@ export default function App() {
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[90vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
             <BreakpointManager
               rules={breakpointRules}
               onSave={saveBreakpointRules}
@@ -1689,7 +1697,7 @@ export default function App() {
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-2xl max-h-[90vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-2xl flex flex-col shadow-xl">
             <SessionHistory
               sessions={sessions}
               onLoad={loadSession}
@@ -1704,7 +1712,7 @@ export default function App() {
       <Dialog.Root open={showSettings} onOpenChange={setShowSettings}>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-2xl max-h-[70vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-2xl flex flex-col shadow-xl">
             <SettingsPanel
               darkMode={darkMode}
               fontSize={fontSize}
@@ -1728,7 +1736,7 @@ export default function App() {
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[85vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
             <CollectionManager
               collections={collections}
               onCreate={createCollection}
@@ -1749,7 +1757,7 @@ export default function App() {
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[85vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
             {viewingCollection && (
               <CollectionViewer
                 collection={viewingCollection}
@@ -1773,7 +1781,7 @@ export default function App() {
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
-          <Dialog.Popup className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl max-h-[85vh] flex flex-col shadow-xl">
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
             <TagManager
               tags={tags}
               onCreate={createTag}

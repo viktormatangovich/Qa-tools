@@ -43,7 +43,10 @@ export type DOMFindingType =
   | "broken-image"
   | "missing-alt"
   | "input-without-label"
-  | "button-without-accessible-name";
+  | "button-without-accessible-name"
+  | "positive-tabindex"
+  | "clickable-without-keyboard"
+  | "low-contrast";
 
 /** Minimal local-DOM evidence returned by the content script. */
 export interface DOMFinding {

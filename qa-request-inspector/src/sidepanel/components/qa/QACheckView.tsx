@@ -3,7 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { QAIssue, QAIssueCategory, QAIssueSeverity } from "../../qa";
 import { EnvironmentComparePanel } from "./EnvironmentComparePanel";
 import type { EnvironmentDifference } from "../../qa/environmentCompare";
-import { loadOpenApiSpecFromUrl, parseOpenApiSpec } from "../../qa/contract/contractChecker";
+import { loadOpenApiSpecFromUrl, parseOpenApiSpec, unsupportedContractFeatures } from "../../qa/contract/contractChecker";
 import { contractTestSuggestions } from "../../qa/contract/suggestions";
 import { diffOpenApi } from "../../qa/contract/contractDiff";
 
@@ -50,6 +50,7 @@ export function QACheckView({ issues, filter, onFilterChange, onOpenRequest, onH
   const [contractFileError, setContractFileError] = useState<string | null>(null);
   const [contractFileName, setContractFileName] = useState<string | null>(null);
   const contractFileInputRef = useRef<HTMLInputElement>(null);
+  const unsupported = useMemo(() => { try { return unsupportedContractFeatures(parseOpenApiSpec(contractSpecText)); } catch { return []; } }, [contractSpecText]);
   const visibleIssues = issues.filter((issue) => matchesFilter(issue, filter));
   const count = (severity: QAIssueSeverity) => issues.filter((issue) => issue.severity === severity).length;
   const filters: Array<[QAFilter, string]> = [
@@ -73,9 +74,9 @@ export function QACheckView({ issues, filter, onFilterChange, onOpenRequest, onH
   const loadContractFromFile = useCallback(async (file: File | undefined) => {
     setContractFileError(null);
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".json") && file.type !== "application/json") {
+    if (! /\.(json|ya?ml)$/i.test(file.name) && file.type !== "application/json") {
       setContractFileName(null);
-      setContractFileError("Выберите JSON-файл со спецификацией OpenAPI 3.x.");
+      setContractFileError("Выберите JSON/YAML-файл со спецификацией OpenAPI 3.x.");
       return;
     }
     try {
@@ -105,29 +106,31 @@ export function QACheckView({ issues, filter, onFilterChange, onOpenRequest, onH
     </div>
     <details className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
       <summary className="cursor-pointer text-xs font-medium">Проверка API-контракта</summary>
-      <p className="mt-2 text-[10px] text-[var(--color-text-muted)]">Загрузите OpenAPI 3.x JSON по URL, из файла или вставьте его вручную. Спецификация хранится только в локальном хранилище расширения.</p>
+      <p className="mt-2 text-[10px] text-[var(--color-text-muted)]">Загрузите OpenAPI 3.x JSON/YAML по URL, из файла или вставьте его вручную. Спецификация хранится только в локальном хранилище расширения.</p>
       <div className="mt-2 flex gap-1">
         <input type="url" value={contractUrl} onChange={(event) => setContractUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void loadContractFromUrl(); }} placeholder="https://api.example.com/openapi.json" className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-[10px]" />
         <button type="button" onClick={() => void loadContractFromUrl()} disabled={contractUrlLoading || !contractUrl.trim()} className="rounded border border-[var(--color-border)] px-2 text-[10px] text-[var(--color-text-muted)] disabled:opacity-50">{contractUrlLoading ? "Загрузка…" : "Загрузить URL"}</button>
       </div>
       {contractUrlError && <p className="mt-1 text-[10px] text-red-600">{contractUrlError}</p>}
       <div className="mt-2 flex items-center gap-2">
-        <input ref={contractFileInputRef} type="file" accept=".json,application/json" className="hidden" onChange={(event) => void loadContractFromFile(event.target.files?.[0])} />
-        <button type="button" onClick={() => contractFileInputRef.current?.click()} className="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-[10px] text-[var(--color-text-muted)]"><FileUp className="h-3.5 w-3.5" />Загрузить JSON-файл</button>
+        <input ref={contractFileInputRef} type="file" accept=".json,.yaml,.yml,application/json" className="hidden" onChange={(event) => void loadContractFromFile(event.target.files?.[0])} />
+        <button type="button" onClick={() => contractFileInputRef.current?.click()} className="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-[10px] text-[var(--color-text-muted)]"><FileUp className="h-3.5 w-3.5" />Загрузить JSON/YAML-файл</button>
         {contractFileName && <span className="truncate text-[10px] text-[var(--color-text-muted)]" title={contractFileName}>{contractFileName}</span>}
       </div>
       {contractFileError && <p className="mt-1 text-[10px] text-red-600">{contractFileError}</p>}
       <textarea value={contractSpecText} onChange={(event) => onContractSpecChange(event.target.value)} placeholder='{"openapi":"3.0.0","paths":{}}' className="mt-2 h-20 w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-[10px]" />
       {contractError && <p className="mt-1 text-[10px] text-red-600">{contractError}</p>}
-      {contractCoverage && <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Покрытие API-контракта: {contractCoverage.exercised}/{contractCoverage.total} endpoints · проверено {contractCoverage.validated} · успешно {contractCoverage.passed} · ошибок {contractCoverage.failed}</p>}
+      {contractCoverage && <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Покрытие API-контракта: {contractCoverage.exercised}/{contractCoverage.total} операций · проверено {contractCoverage.validated} · успешно {contractCoverage.passed} · ошибок {contractCoverage.failed}</p>}
       {suggestions.length > 0 && <details className="mt-2 text-[10px]"><summary>Детерминированные тестовые значения</summary><pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap">{suggestions.join("\n")}</pre></details>}
-      <details className="mt-2 text-[10px]"><summary>Сравнение контрактов (текущий → сравниваемый)</summary><textarea value={comparisonSpec} onChange={(event) => setComparisonSpec(event.target.value)} placeholder="Вставьте сравниваемый OpenAPI 3.x JSON" className="mt-1 h-16 w-full rounded border border-border bg-bg p-1 font-mono" />{diff.length > 0 && <ul className="mt-1 list-disc pl-4">{diff.map((entry, index) => <li key={`${entry.message}:${index}`}>[{entry.severity}] {entry.message}</li>)}</ul>}</details>
+      <details className="mt-2 text-[10px]"><summary>Сравнение контрактов (текущий → сравниваемый)</summary><textarea value={comparisonSpec} onChange={(event) => setComparisonSpec(event.target.value)} placeholder="Вставьте сравниваемый OpenAPI 3.x JSON/YAML" className="mt-1 h-16 w-full rounded border border-border bg-bg p-1 font-mono" />{diff.length > 0 && <ul className="mt-1 list-disc pl-4">{diff.map((entry, index) => <li key={`${entry.message}:${index}`}>[{entry.severity === "breaking" ? "Несовместимое" : "Совместимое"}] {entry.message}</li>)}</ul>}</details>
     </details>
+    <p className="text-xs">Поддерживаются типы, enum, обязательные поля, числовые и строковые границы, массивы и локальные ссылки schemas. Внешние ссылки и сложные схемы показываются как неподдерживаемые.</p>
+    {unsupported.length > 0 && <details className="text-xs text-amber-700"><summary>Неподдерживаемые проверки ({unsupported.length})</summary>{unsupported.map(text => <p className="break-all" key={text}>{text}</p>)}</details>}
     <EnvironmentComparePanel sessions={sessions} onCompare={onCompareSessions} />
     <div className="grid grid-cols-3 gap-1"><button onClick={() => onExportSessionReport('md')} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-2 text-[10px] font-medium">Отчёт Markdown</button><button onClick={() => onExportSessionReport('html')} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-2 text-[10px] font-medium">Отчёт HTML</button><button onClick={() => onExportSessionReport('json')} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-2 text-[10px] font-medium">Отчёт JSON</button></div>
     {visibleIssues.length === 0 ? <div className="py-12 text-center text-xs text-[var(--color-text-muted)]">Для этого фильтра проблем не найдено.</div> : <div className="space-y-2">
       {visibleIssues.map((issue) => <article key={issue.id} className="w-full text-left p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <div className="flex justify-between gap-2"><span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-semibold ${severityStyle[issue.severity]}`}>{issue.severity}</span><span className="text-[10px] text-[var(--color-text-muted)]">{issue.category}</span></div>
+        <div className="flex justify-between gap-2"><span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-semibold ${severityStyle[issue.severity]}`}>{{ info: "Информация", warning: "Предупреждение", error: "Ошибка", critical: "Критично" }[issue.severity]}</span><span className="text-[10px] text-[var(--color-text-muted)]">{{ network: "Сеть", console: "Консоль", performance: "Скорость", dom: "DOM", accessibility: "Доступность", contract: "Контракт", security: "Безопасность" }[issue.category]}</span></div>
         <div className="mt-2 text-xs font-semibold flex gap-1.5"><AlertCircle className="w-3.5 h-3.5 shrink-0" />{issue.title}</div>
         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{issue.description}</p>
         {typeof issue.evidence?.selector === "string" && <button type="button" onClick={() => onHighlightIssue(issue)} className="mt-2 inline-flex items-center gap-1 text-[10px] text-accent"><LocateFixed className="h-3 w-3" />{"\u041d\u0430\u0439\u0442\u0438 \u043d\u0430 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0435"}</button>}

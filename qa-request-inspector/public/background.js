@@ -2,6 +2,8 @@
 // Uses chrome.debugger CDP for network capture (no page-context injection)
 // CDP domains used: Network, Fetch, Runtime only (no Runtime.evaluate)
 
+import { nextMockResponse } from "./mockSequence.js";
+
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 // Re-inject content scripts into existing tabs on install/update
@@ -31,6 +33,9 @@ chrome.runtime.onInstalled.addListener(async () => {
 // State
 // ========================================
 
+const streamMessages = new Map();
+const streamUrls = new Map();
+const mockSequenceIndexes = new Map();
 const apiRequests = new Map(); // tabId -> requests[]
 const consoleErrors = new Map(); // tabId -> errors[]
 const MAX_REQUESTS_PER_TAB = 100;
@@ -115,6 +120,7 @@ async function attachDebugger(tabId) {
 }
 
 async function detachDebugger(tabId) {
+  for (const key of mockSequenceIndexes.keys()) if (key.startsWith(tabId + ":")) mockSequenceIndexes.delete(key);
   const state = debuggerState.get(tabId);
   if (!state?.attached) return;
 
@@ -149,19 +155,21 @@ function notifySidePanel(message) {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "sidepanel") return;
   // Verify port is from extension page (not content script)
-  if (port.sender?.tab) return;
+  if (port.sender?.tab && !port.sender.url?.startsWith(chrome.runtime.getURL(""))) return;
 
   sidePanelPort = port;
 
-  // Attach to active tab
-  chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-    if (tabs[0]?.id) {
-      activeTabId = tabs[0].id;
+  // Full-page preview may be active; capture the most recent website tab.
+  chrome.tabs.query({ currentWindow: true }, async (tabs) => {
+    const target = tabs.find(tab => tab.active && /^https?:/.test(tab.url || "")) || tabs.filter(tab => /^https?:/.test(tab.url || "")).sort((a,b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+    if (target?.id) {
+      activeTabId = target.id;
       await attachDebugger(activeTabId);
     }
   });
 
   port.onDisconnect.addListener(() => {
+    if (sidePanelPort !== port) return;
     sidePanelPort = null;
     if (activeTabId) {
       detachDebugger(activeTabId);
@@ -203,6 +211,8 @@ chrome.debugger.onDetach.addListener((source, reason) => {
 // Tab switching while side panel is open
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   if (!sidePanelPort) return;
+  const target = await chrome.tabs.get(activeInfo.tabId);
+  if (!/^https?:/.test(target.url || "")) return;
 
   const generation = ++tabSwitchGeneration;
   const oldTabId = activeTabId;
@@ -229,8 +239,27 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
 
   switch (method) {
     // --- Network domain (Unit 3) ---
+    case "Network.webSocketCreated": {
+      streamUrls.set(tabId + ':' + params.requestId, params.url);
+      break;
+    }
+    case "Network.webSocketClosed": {
+      streamUrls.delete(tabId + ':' + params.requestId);
+      break;
+    }
+    case "Network.webSocketFrameReceived":
+    case "Network.webSocketFrameSent":
+    case "Network.eventSourceMessageReceived": {
+      const key = tabId + ':' + params.requestId;
+      const data = params.response?.payloadData ?? params.data ?? "";
+      const entry = { id: crypto.randomUUID(), protocol: method.includes("webSocket") ? "WebSocket" : "SSE", direction: method.endsWith("Sent") ? "Отправлено" : "Получено", url: streamUrls.get(key) || pendingRequests.get(params.requestId)?.url || "", data: String(data).slice(0, 65536), timestamp: Date.now() };
+      const list = streamMessages.get(tabId) || [];
+      streamMessages.set(tabId, [...list, entry].slice(-200));
+      break;
+    }
     case "Network.requestWillBeSent": {
       const type = params.type; // 'XHR', 'Fetch', 'Document', etc.
+      if (type === "EventSource") streamUrls.set(tabId + ":" + params.requestId, params.request.url);
       if (type !== "XHR" && type !== "Fetch") return;
 
       pendingRequests.set(params.requestId, {
@@ -481,14 +510,21 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
       }
 
       // Check mocks second
-      const matchedMock = mockRules.find((rule) => {
+      let matchedMock = mockRules.find((rule) => {
         if (!rule.enabled) return false;
         if (rule.method && rule.method !== "ALL" && rule.method !== reqMethod)
           return false;
         return matchUrlPattern(url, rule.urlPattern);
       });
 
+      if (matchedMock?.sequence?.length) {
+        const key = tabId + ':' + matchedMock.id;
+        const next = nextMockResponse(matchedMock, mockSequenceIndexes.get(key) || 0);
+        mockSequenceIndexes.set(key, next.index);
+        matchedMock = next.response;
+      }
       if (matchedMock) {
+        if (matchedMock.delay) await new Promise(resolve => setTimeout(resolve, Math.min(30000, Math.max(0, matchedMock.delay))));
         // Track networkId for dedup with Network domain
         if (params.networkId) {
           mockedNetworkIds.add(params.networkId);
@@ -680,6 +716,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
     }
 
+    case "GET_STREAM_MESSAGES": {
+      chrome.tabs.query({ active: true, currentWindow: true }, tabs => sendResponse({ messages: streamMessages.get(tabs[0]?.id) || [] }));
+      return true;
+    }
+    case "CLEAR_STREAM_MESSAGES": {
+      chrome.tabs.query({ active: true, currentWindow: true }, tabs => { streamMessages.delete(tabs[0]?.id); sendResponse({ success: true }); });
+      return true;
+    }
     case "GET_API_REQUESTS": {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tabId = tabs[0]?.id;
@@ -725,6 +769,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     case "SAVE_MOCK_RULES": {
+      mockSequenceIndexes.clear();
       chrome.storage.local.set({ mockRules: message.payload }, () => {
         // Update Fetch patterns for attached tabs
         for (const [tabId, state] of debuggerState) {
@@ -785,6 +830,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ========================================
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  streamMessages.delete(tabId);
+  for (const key of streamUrls.keys()) if (key.startsWith(tabId + ":")) streamUrls.delete(key);
   apiRequests.delete(tabId);
   consoleErrors.delete(tabId);
   debuggerState.delete(tabId);
@@ -836,3 +883,18 @@ chrome.tabs.onReplaced.addListener(async (addedTabId, removedTabId) => {
     await attachDebugger(addedTabId);
   }
 });
+
+async function cleanupSessions() {
+  const stored = await chrome.storage.local.get(null);
+  const sessions = (stored.sessions || []).filter(s => s.timestamp > Date.now() - 86400000).sort((a,b) => b.timestamp - a.timestamp).slice(0, 3);
+  const retained = new Set(sessions.map(s => 'session_' + s.id));
+  const expired = Object.keys(stored).filter(key => key.startsWith('session_') && !retained.has(key));
+  if (JSON.stringify(sessions) !== JSON.stringify(stored.sessions || [])) {
+    await chrome.storage.local.set({ sessions });
+    notifySidePanel({ type: "SESSION_HISTORY_CHANGED", payload: sessions });
+  }
+  if (expired.length) await chrome.storage.local.remove(expired);
+}
+chrome.alarms.create('qa-session-cleanup', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'qa-session-cleanup') void cleanupSessions().catch(console.error); });
+void cleanupSessions().catch(console.error);
