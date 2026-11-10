@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AlertTriangle, X } from 'lucide-react'
 import type { ConsoleError } from '../../types'
+import { t } from '../../locales'
 
 interface ConsoleErrorDetailProps {
   error: ConsoleError
@@ -28,7 +29,7 @@ ${error.stack}
 \`\`\`
 ` : ''}
 ---
-Помоги разобраться с ошибкой: что её вызвало и как её исправить?
+${t().consoleReportQuestion}
 `
     await navigator.clipboard.writeText(text)
     setCopied(true)
@@ -46,7 +47,7 @@ ${error.stack}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-red-500" />
-          <span className="text-sm font-medium">Console Error</span>
+          <span className="text-sm font-medium">{t().consoleErrorTitle}</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -57,7 +58,7 @@ ${error.stack}
                 : 'bg-accent text-white hover:opacity-90'
             }`}
           >
-            {copied ? 'Copied!' : 'Copy context'}
+            {copied ? t().consoleCopied : t().consoleCopyContext}
           </button>
           <button
             onClick={onClose}
@@ -72,7 +73,7 @@ ${error.stack}
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {/* Error Type */}
         <div>
-          <p className="text-[10px] text-text-muted mb-1">Type</p>
+          <p className="text-[10px] text-text-muted mb-1">{t().consoleType}</p>
           <span className={`text-xs px-2 py-1 rounded font-medium ${
             error.type === 'error' ? 'bg-red-100 text-red-700' :
             error.type === 'unhandledrejection' ? 'bg-amber-100 text-amber-700' :
@@ -84,7 +85,7 @@ ${error.stack}
 
         {/* Message */}
         <div>
-          <p className="text-[10px] text-text-muted mb-1">Message</p>
+          <p className="text-[10px] text-text-muted mb-1">{t().consoleMessage}</p>
           <p className="text-sm bg-bg p-3 rounded-lg border border-border">
             {error.message}
           </p>
@@ -93,7 +94,7 @@ ${error.stack}
         {/* Location */}
         {error.filename && (
           <div>
-            <p className="text-[10px] text-text-muted mb-1">Location</p>
+            <p className="text-[10px] text-text-muted mb-1">{t().consoleLocation}</p>
             <p className="text-xs font-mono bg-bg p-2 rounded-lg border border-border">
               {error.filename}
               {error.lineno && `:${error.lineno}`}
@@ -105,7 +106,7 @@ ${error.stack}
         {/* Stack Trace */}
         {error.stack && (
           <div>
-            <p className="text-[10px] text-text-muted mb-1">Stack Trace</p>
+            <p className="text-[10px] text-text-muted mb-1">{t().consoleStack}</p>
             <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-bg p-3 rounded-lg border border-border max-h-48 overflow-auto">
               {error.stack}
             </pre>
@@ -114,7 +115,7 @@ ${error.stack}
 
         {/* Page Info */}
         <div>
-          <p className="text-[10px] text-text-muted mb-1">Page</p>
+          <p className="text-[10px] text-text-muted mb-1">{t().consolePage}</p>
           <p className="text-xs font-mono break-all bg-bg p-2 rounded-lg border border-border">
             {error.pageUrl}
           </p>

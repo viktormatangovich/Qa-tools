@@ -24,7 +24,12 @@ dist/
 
 # Store assets (generated)
 store-assets/
-api-debugger.zip
+# The shipped archive is ../qa-tools.zip (repository root); archives here are leftovers
+*.zip
+
+# npm is the package manager for this project
+bun.lock
+bun.lockb
 
 # Screenshots
 public/screenshot.png

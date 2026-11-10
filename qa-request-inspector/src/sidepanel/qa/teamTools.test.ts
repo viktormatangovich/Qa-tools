@@ -63,5 +63,5 @@ test('OpenAPI YAML принимает integer как number и исключае�
   assert.equal(validateResponse(doc, { ...req, responseBody: 3 }).length, 0);
   assert.equal(contractCoverage(doc, [req]).total, 1);
   const unsupported = parseOpenApiSpec('{"openapi":"3.1.0","paths":{},"components":{"schemas":{"A":{"oneOf":[],"$ref":"external.yaml"}}}}');
-  assert.equal(unsupportedContractFeatures(unsupported).length, 2);
+  assert.equal(unsupportedContractFeatures(unsupported).length, 1); // oneOf is validated now; the external $ref is not loaded
 });

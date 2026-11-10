@@ -1,6 +1,33 @@
+export type ResourceType =
+  | "fetch"
+  | "xhr"
+  | "document"
+  | "script"
+  | "stylesheet"
+  | "image"
+  | "font"
+  | "media"
+  | "other";
+
+/** Phases of a request in milliseconds (from the browser's resource timing). */
+export interface RequestTimings {
+  blocked: number;
+  dns: number;
+  connect: number;
+  ssl: number;
+  send: number;
+  wait: number;
+  receive: number;
+}
+
+export interface GraphQLInfo {
+  operationName: string;
+  operationType: "query" | "mutation" | "subscription";
+}
+
 export interface ApiRequest {
   id: string;
-  type: "fetch" | "xhr";
+  type: ResourceType;
   method: string;
   url: string;
   requestHeaders: Record<string, string>;
@@ -15,12 +42,35 @@ export interface ApiRequest {
   pageUrl: string;
   pageTitle: string;
   mocked?: boolean;
+  /** The request or its response was changed at a breakpoint or by a "patch" rule. */
+  modified?: boolean;
+  timings?: RequestTimings;
+  /** Bytes received over the network (compressed), when the browser reported it. */
+  transferSize?: number;
+  protocol?: string;
+  remoteAddress?: string;
+  fromCache?: boolean;
+  graphql?: GraphQLInfo;
+}
+
+export type RuleMode = "mock" | "patch" | "delay" | "block";
+
+/** One change of a "patch" rule: a JSON path in the real response and its new value (JSON text). */
+export interface ResponsePatch {
+  path: string;
+  value: string;
+  remove?: boolean;
 }
 
 export interface MockRule {
   id: string;
   urlPattern: string;
   method: "ALL" | "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /**
+   * mock (default): answer instead of the server; patch: change fields of the real response;
+   * delay: send the real request later; block: fail the request.
+   */
+  mode?: RuleMode;
   status: number;
   statusText: string;
   responseBody: string;
@@ -31,6 +81,10 @@ export interface MockRule {
   description?: string;
   sequence?: Array<{ status: number; responseBody: string; delay?: number; abort?: boolean }>;
   sequenceEnd?: "repeat" | "last" | "passthrough";
+  /** patch mode: fields to change in the real JSON response. */
+  patches?: ResponsePatch[];
+  /** patch mode: replace the HTTP status as well (0 or undefined keeps the real one). */
+  patchStatus?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -40,6 +94,57 @@ export interface BreakpointRule {
   urlPattern: string;
   method: "ALL" | "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   enabled: boolean;
+  /** request (default): pause before sending; response: pause when the response arrives. */
+  stage?: "request" | "response";
+}
+
+/** Capture settings shared with the background (public/captureStore.js normalizes them). */
+export interface CaptureSettings {
+  preserveLog: boolean;
+  maxRequests: number;
+  captureAllResources: boolean;
+  throttle: "none" | "fast3g" | "slow3g" | "offline" | "custom";
+  customLatencyMs: number;
+  customDownloadKbps: number;
+  customUploadKbps: number;
+}
+
+export interface JiraSettings {
+  baseUrl: string;
+  /** basic: e-mail + API token (Jira Cloud); bearer: personal access token (Jira Server / Data Center). */
+  authType: "basic" | "bearer";
+  email: string;
+  token: string;
+  projectKey: string;
+  issueType: string;
+}
+
+export type Language = "ru" | "en";
+
+/** A WebSocket frame or an SSE message kept by the background. */
+export interface StreamMessage {
+  id: string;
+  protocol: string;
+  direction: string;
+  url: string;
+  /** Text of the message; for a binary frame the first bytes, base64-encoded. */
+  data: string;
+  timestamp: number;
+  binary?: boolean;
+  /** Size of a binary frame in bytes. */
+  size?: number;
+}
+
+/** A request paused at a breakpoint, with everything needed to edit it. */
+export interface PausedRequest {
+  requestId: string;
+  tabId: number;
+  stage: "request" | "response";
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  postData: string | null;
+  response?: { status: number; headers: Record<string, string>; body: string; binary: boolean };
 }
 
 export interface ConsoleError {
@@ -70,6 +175,8 @@ export interface Session {
   name: string;
   timestamp: number;
   count: number;
+  /** A reference session: kept until deleted, outside the 24-hour / three-session limit. */
+  pinned?: boolean;
 }
 
 export type HttpMethod = "ALL" | "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

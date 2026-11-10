@@ -162,7 +162,7 @@ export function JsonTreeView({
           {scanStatus === 'scanning' ? (
             <>
               <Loader2 className="w-3 h-3 animate-spin" />
-              Сканирование ({progress.scanned}/{progress.total})
+              {t().scanningProgress(progress.scanned, progress.total)}
             </>
           ) : (
             <>
@@ -174,7 +174,7 @@ export function JsonTreeView({
 
         {scanStatus === 'complete' && usageCache && (
           <span className="text-[10px] text-text-muted">
-            {Array.from(usageCache.values()).filter(u => u.count > 0).length} полей найдено на странице
+            {t().fieldsFoundOnPage(Array.from(usageCache.values()).filter(u => u.count > 0).length)}
           </span>
         )}
 
@@ -199,7 +199,7 @@ export function JsonTreeView({
         ref={treeRef}
         className="bg-bg rounded-lg border border-border p-3 font-mono text-xs overflow-auto max-h-[60vh]"
         role="tree"
-        aria-label="JSON response tree"
+        aria-label={t().jsonTreeLabel}
       >
         <JsonTreeNode
           keyName={null}

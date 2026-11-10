@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { LocaleStrings } from "../locales";
 
 interface ShortcutMap {
   [key: string]: () => void;
@@ -42,17 +43,18 @@ export function useKeyboardShortcuts(shortcuts: ShortcutMap) {
   }, [shortcuts]);
 }
 
-export const DEFAULT_SHORTCUTS: Record<string, string> = {
-  "ctrl+f": "Поиск по URL",
-  "ctrl+shift+f": "Поиск в теле",
-  "ctrl+e": "Экспорт",
-  "ctrl+l": "Очистить всё",
-  "ctrl+shift+e": "Экспорт в HAR",
-  "ctrl+1": "Фильтр: Все",
-  "ctrl+2": "Фильтр: Ошибки",
-  "ctrl+3": "Фильтр: Медленные",
-  "ctrl+4": "Фильтр: Консоль",
-  "ctrl+shift+c": "Сравнение",
-  "ctrl+shift+s": "Настройки",
-  Escape: "Закрыть диалог",
+/** Shortcut → key of its description in the locale dictionary (read it with t()[key] at render time). */
+export const DEFAULT_SHORTCUTS: Record<string, keyof LocaleStrings> = {
+  "ctrl+f": "shortcutSearchUrl",
+  "ctrl+shift+f": "shortcutSearchBody",
+  "ctrl+e": "shortcutExport",
+  "ctrl+l": "shortcutClear",
+  "ctrl+shift+e": "shortcutExportHar",
+  "ctrl+1": "shortcutFilterAll",
+  "ctrl+2": "shortcutFilterErrors",
+  "ctrl+3": "shortcutFilterSlow",
+  "ctrl+4": "shortcutFilterConsole",
+  "ctrl+shift+c": "shortcutCompare",
+  "ctrl+shift+s": "shortcutSettings",
+  Escape: "shortcutClose",
 };

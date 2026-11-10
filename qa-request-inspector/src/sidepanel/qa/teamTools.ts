@@ -5,15 +5,122 @@ import type { NegativeTestCase } from './negativeTesting';
 
 export type Environment = 'local' | 'test' | 'production';
 export interface BusinessRule { id: string; name: string; path: string; operator: 'exists' | 'equals' | 'gte' | 'sum'; expected: string; sumPath?: string; }
-export interface ManualStep { id: string; text: string; timestamp: number; requestIds: string[]; }
+
+/** How a test finds the element of a recorded action. */
+export interface StepLocator { kind: 'testid' | 'role' | 'label' | 'placeholder' | 'css'; value: string; role?: string; }
+/** A user action recorded on the page by the content script (public/content.js, StepRecorder). */
+export interface RecordedAction {
+  kind: 'click' | 'fill' | 'select' | 'check' | 'uncheck' | 'upload' | 'press' | 'navigate';
+  locator?: StepLocator;
+  selector?: string;
+  /** Visible name of the element: button text, field label. */
+  name?: string;
+  tag?: string;
+  role?: string;
+  value?: string;
+  optionLabel?: string;
+  key?: string;
+  /** The value was not recorded (password field). */
+  secret?: boolean;
+  url?: string;
+  pageUrl?: string;
+  timestamp?: number;
+}
+export interface ManualStep { id: string; text: string; timestamp: number; requestIds: string[]; action?: RecordedAction; }
+
+/** Words for recorded steps; the panel passes the current locale. */
+export interface StepWords {
+  click: (name: string) => string;
+  fill: (name: string, value: string) => string;
+  fillSecret: (name: string) => string;
+  select: (name: string, option: string) => string;
+  check: (name: string) => string;
+  uncheck: (name: string) => string;
+  upload: (name: string, files: string) => string;
+  press: (key: string, name: string) => string;
+  navigate: (url: string) => string;
+  element: string;
+}
+
+/** A recorded action as a reproduction step, e.g. `Нажать «Сохранить»`. */
+export function stepText(action: RecordedAction, words: StepWords): string {
+  const name = action.name || action.locator?.value || action.selector || words.element;
+  switch (action.kind) {
+    case 'click': return words.click(name);
+    case 'fill': return action.secret ? words.fillSecret(name) : words.fill(name, action.value ?? '');
+    case 'select': return words.select(name, action.optionLabel || action.value || '');
+    case 'check': return words.check(name);
+    case 'uncheck': return words.uncheck(name);
+    case 'upload': return words.upload(name, action.value ?? '');
+    case 'press': return words.press(action.key || 'Enter', name);
+    case 'navigate': return words.navigate(action.url || '');
+  }
+}
+
+function playwrightLocator(action: RecordedAction): string {
+  const locator = action.locator;
+  const text = (value: string) => JSON.stringify(value);
+  if (!locator) return `page.locator(${text(action.selector || 'body')})`;
+  switch (locator.kind) {
+    case 'testid': return `page.getByTestId(${text(locator.value)})`;
+    case 'role': return `page.getByRole(${text(locator.role || 'button')}, { name: ${text(locator.value)} })`;
+    case 'label': return `page.getByLabel(${text(locator.value)})`;
+    case 'placeholder': return `page.getByPlaceholder(${text(locator.value)})`;
+    case 'css': return `page.locator(${text(locator.value)})`;
+  }
+}
+
+/**
+ * A Playwright UI test from recorded steps. Steps typed by hand become comments; a password is read
+ * from the environment, because its value is never recorded.
+ */
+export function playwrightUiScenario(steps: ManualStep[], title = 'Recorded scenario'): string {
+  const startUrl = steps.find((step) => step.action?.pageUrl || step.action?.url)?.action;
+  const lines: string[] = [];
+  let currentUrl = startUrl?.kind === 'navigate' ? '' : startUrl?.pageUrl || '';
+  if (currentUrl) lines.push(`  await page.goto(${JSON.stringify(currentUrl)});`);
+  let secrets = 0;
+
+  for (const step of steps) {
+    const action = step.action;
+    if (!action) {
+      lines.push(`  // ${step.text}`);
+      continue;
+    }
+    const target = playwrightLocator(action);
+    switch (action.kind) {
+      case 'navigate':
+        // A navigation caused by the previous click needs no goto, only a check.
+        if (!currentUrl) lines.push(`  await page.goto(${JSON.stringify(action.url || '')});`);
+        else lines.push(`  await page.waitForURL(${JSON.stringify(action.url || '')});`);
+        currentUrl = action.url || currentUrl;
+        break;
+      case 'click': lines.push(`  await ${target}.click();`); break;
+      case 'fill':
+        if (action.secret) {
+          secrets += 1;
+          lines.push(`  await ${target}.fill(process.env.TEST_PASSWORD${secrets > 1 ? `_${secrets}` : ''} ?? '');`);
+        } else lines.push(`  await ${target}.fill(${JSON.stringify(action.value ?? '')});`);
+        break;
+      case 'select': lines.push(`  await ${target}.selectOption(${JSON.stringify(action.value ?? '')});`); break;
+      case 'check': lines.push(`  await ${target}.check();`); break;
+      case 'uncheck': lines.push(`  await ${target}.uncheck();`); break;
+      case 'upload': lines.push(`  // ${step.text}`, `  await ${target}.setInputFiles([/* ${action.value || 'file'} */]);`); break;
+      case 'press': lines.push(`  await ${target}.press(${JSON.stringify(action.key || 'Enter')});`); break;
+    }
+  }
+  return `import { test, expect } from '@playwright/test';\n\ntest(${JSON.stringify(title)}, async ({ page }) => {\n${lines.join('\n') || '  // No recorded steps.'}\n  // Add the expected result, e.g. await expect(page.getByText('...')).toBeVisible();\n});\n`;
+}
 export interface ProjectProfile {
   id: string; name: string; domains: string[]; environment: Environment;
   qaSettings: QASettings; contractSpecText: string; excludedRuleIds: string[];
   compareOptions: CompareOptions; mockRules: MockRule[]; businessRules: BusinessRule[];
   filters?: { method: string; status: string; header: string; jsonSearch: string };
 }
+/** Kept sessions: every pinned (reference) one, plus the three newest unpinned ones of the last 24 hours. */
 export function retainedSessions(sessions: Session[], now = Date.now()): Session[] {
-  return sessions.filter(s => s.timestamp > now - 86400000).sort((a, b) => b.timestamp - a.timestamp).slice(0, 3);
+  const recent = sessions.filter(s => !s.pinned && s.timestamp > now - 86400000).sort((a, b) => b.timestamp - a.timestamp).slice(0, 3);
+  return [...sessions.filter(s => s.pinned), ...recent].sort((a, b) => b.timestamp - a.timestamp);
 }
 export function readPath(value: unknown, path: string): unknown {
   const tokens = path.replace(/^\$\.?/, '').replace(/\[(\d+|\*)\]/g, '.$1').split('.').filter(Boolean);

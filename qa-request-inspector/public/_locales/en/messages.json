@@ -1,0 +1,11 @@
+{
+  "appName": {
+    "message": "QA Tools"
+  },
+  "appDesc": {
+    "message": "Capture API calls, find errors and export them for debugging"
+  },
+  "openTitle": {
+    "message": "Open QA Tools"
+  }
+}

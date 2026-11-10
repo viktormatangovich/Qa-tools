@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { UsageResult } from '../types'
+import { sendToPage } from '../utils/pageMessaging'
 
 export function useFieldUsage(data: unknown) {
   const [usageCache, setUsageCache] = useState<Map<string, UsageResult>>(new Map())
@@ -52,13 +53,6 @@ export function useFieldUsage(data: unknown) {
       return
     }
 
-    // Get current active tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (!tab?.id) {
-      setScanStatus('idle')
-      return
-    }
-
     const newCache = new Map<string, UsageResult>()
     const BATCH_SIZE = 15
 
@@ -69,15 +63,14 @@ export function useFieldUsage(data: unknown) {
       const batch = leafValues.slice(i, i + BATCH_SIZE)
 
       try {
-        console.log('[Reqpane] Sending batch to tab', tab.id, batch.length, 'values')
-        const results = await chrome.tabs.sendMessage(tab.id, {
+        // The content script is injected into the page on first use.
+        const results = await sendToPage<Record<string, UsageResult>>({
           type: 'BATCH_SEARCH_DOM',
           values: batch,
         })
-        console.log('[Reqpane] Received results:', results)
 
         // Store results
-        Object.entries(results as Record<string, UsageResult>).forEach(([path, result]) => {
+        Object.entries(results ?? {}).forEach(([path, result]) => {
           newCache.set(path, result)
         })
       } catch (err) {
@@ -103,11 +96,8 @@ export function useFieldUsage(data: unknown) {
     const usage = usageCache.get(path)
     if (!usage || usage.count === 0) return
 
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (!tab?.id) return
-
     try {
-      await chrome.tabs.sendMessage(tab.id, {
+      await sendToPage({
         type: 'HIGHLIGHT_ELEMENTS',
         elements: usage.elements,
         label: path.split('.').pop() || String(value),
@@ -119,11 +109,8 @@ export function useFieldUsage(data: unknown) {
 
   // Clear highlights from page
   const clearHighlights = useCallback(async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (!tab?.id) return
-
     try {
-      await chrome.tabs.sendMessage(tab.id, { type: 'CLEAR_HIGHLIGHTS' })
+      await sendToPage({ type: 'CLEAR_HIGHLIGHTS' })
     } catch {
       // Ignore
     }

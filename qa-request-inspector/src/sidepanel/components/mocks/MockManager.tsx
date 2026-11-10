@@ -264,13 +264,19 @@ export function MockManager({
                     <span className={`text-xs font-mono font-semibold ${getMethodColor(rule.method)}`}>
                       {rule.method}
                     </span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                      rule.status < 300 ? 'bg-emerald-50 text-emerald-600' :
-                      rule.status < 400 ? 'bg-amber-50 text-amber-600' :
-                      'bg-red-50 text-red-600'
-                    }`}>
-                      {rule.status}
-                    </span>
+                    {(rule.mode ?? 'mock') === 'mock' ? (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                        rule.status < 300 ? 'bg-emerald-50 text-emerald-600' :
+                        rule.status < 400 ? 'bg-amber-50 text-amber-600' :
+                        'bg-red-50 text-red-600'
+                      }`}>
+                        {rule.status}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-purple-100 text-purple-700">
+                        {t().ruleModeBadges[rule.mode ?? 'mock']}
+                      </span>
+                    )}
                     {rule.delay ? (
                       <span className="text-[10px] text-[var(--color-text-muted)]">
                         ⏱ {rule.delay}ms

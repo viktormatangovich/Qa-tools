@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
-import type { MockRule } from '../../types'
+import type { MockRule, ResponsePatch, RuleMode } from '../../types'
 import { t } from '../../locales'
 
 interface MockRuleEditorProps {
@@ -42,6 +42,13 @@ export function MockRuleEditor({
     Object.entries(rule.responseHeaders || {}).map(([key, value]) => ({ key, value }))
   )
   const [jsonError, setJsonError] = useState<string | null>(null)
+  const [mode, setMode] = useState<RuleMode>(rule.mode ?? 'mock')
+  const [patches, setPatches] = useState<ResponsePatch[]>(rule.patches?.length ? rule.patches : [{ path: '', value: '' }])
+  const [patchStatus, setPatchStatus] = useState(rule.patchStatus ?? 0)
+
+  const updatePatch = useCallback((index: number, change: Partial<ResponsePatch>) => {
+    setPatches(prev => prev.map((patch, i) => i === index ? { ...patch, ...change } : patch))
+  }, [])
 
   const validateJson = useCallback((value: string) => {
     if (!value.trim()) {
@@ -53,7 +60,7 @@ export function MockRuleEditor({
       setJsonError(null)
       return true
     } catch {
-      setJsonError('Некорректный JSON')
+      setJsonError(t().invalidJson)
       return false
     }
   }, [])
@@ -97,8 +104,12 @@ export function MockRuleEditor({
       delay,
       description: description.trim() || undefined,
       enabled: rule.enabled,
+      mode,
+      patches: mode === 'patch' ? patches.filter(patch => patch.path.trim()).map(patch => ({ ...patch, path: patch.path.trim() })) : undefined,
+      patchStatus: mode === 'patch' && patchStatus ? patchStatus : undefined,
+      updatedAt: Date.now(),
     })
-  }, [rule, urlPattern, method, status, statusText, responseBody, headers, delay, description, onSave])
+  }, [rule, urlPattern, method, status, statusText, responseBody, headers, delay, description, mode, patches, patchStatus, onSave])
 
   const formatJson = useCallback(() => {
     try {
@@ -156,6 +167,75 @@ export function MockRuleEditor({
           </p>
         </div>
 
+        {/* What the rule does with a matching request */}
+        <div>
+          <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().ruleMode}</label>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as RuleMode)}
+            className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] focus:outline-none focus:border-purple-500"
+          >
+            <option value="mock">{t().ruleModeMock}</option>
+            <option value="patch">{t().ruleModePatch}</option>
+            <option value="delay">{t().ruleModeDelay}</option>
+            <option value="block">{t().ruleModeBlock}</option>
+          </select>
+          <p className="text-[10px] text-[var(--color-text-muted)] mt-1">{t().ruleModeHints[mode]}</p>
+        </div>
+
+        {/* Patch mode: fields to change in the real response */}
+        {mode === 'patch' && (
+          <div className="space-y-2">
+            <label className="text-xs font-medium block text-[var(--color-text)]">{t().patchesTitle}</label>
+            {patches.map((patch, index) => (
+              <div key={index} className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={patch.path}
+                  onChange={(e) => updatePatch(index, { path: e.target.value })}
+                  placeholder={t().patchPath}
+                  className="min-w-0 flex-1 px-2 py-1.5 text-xs font-mono rounded border border-[var(--color-border)] bg-[var(--color-surface)] focus:outline-none focus:border-purple-500"
+                />
+                <input
+                  type="text"
+                  value={patch.value}
+                  disabled={patch.remove}
+                  onChange={(e) => updatePatch(index, { value: e.target.value })}
+                  placeholder={t().patchValue}
+                  className="min-w-0 flex-1 px-2 py-1.5 text-xs font-mono rounded border border-[var(--color-border)] bg-[var(--color-surface)] focus:outline-none focus:border-purple-500 disabled:opacity-40"
+                />
+                <label className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)] shrink-0">
+                  <input type="checkbox" checked={Boolean(patch.remove)} onChange={(e) => updatePatch(index, { remove: e.target.checked })} />
+                  {t().patchRemove}
+                </label>
+                <button
+                  onClick={() => setPatches(prev => prev.filter((_, i) => i !== index))}
+                  className="p-1 text-red-500 hover:bg-red-50 rounded shrink-0"
+                  aria-label={t().delete}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => setPatches(prev => [...prev, { path: '', value: '' }])}
+              className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-700"
+            >
+              <Plus className="w-3 h-3" /> {t().addPatch}
+            </button>
+            <div>
+              <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().patchStatus}</label>
+              <input
+                type="number"
+                value={patchStatus || ''}
+                onChange={(e) => setPatchStatus(Math.max(0, parseInt(e.target.value) || 0))}
+                placeholder="200"
+                className="w-28 px-3 py-2 text-sm font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] focus:outline-none focus:border-purple-500"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Method + Status + Delay */}
         <div className="flex gap-3">
           <div className="flex-1">
@@ -173,7 +253,7 @@ export function MockRuleEditor({
               <option value="DELETE">DELETE</option>
             </select>
           </div>
-          <div className="w-24">
+          <div className={mode === 'mock' ? 'w-24' : 'hidden'}>
             <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().mockStatusCode}</label>
             <input
               type="number"
@@ -182,7 +262,7 @@ export function MockRuleEditor({
               className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] focus:outline-none focus:border-purple-500"
             />
           </div>
-          <div className="w-28">
+          <div className={mode === 'mock' ? 'w-28' : 'hidden'}>
             <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().mockStatusText}</label>
             <input
               type="text"
@@ -191,7 +271,7 @@ export function MockRuleEditor({
               className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] focus:outline-none focus:border-purple-500"
             />
           </div>
-          <div className="w-24">
+          <div className={mode === 'block' ? 'hidden' : 'w-24'}>
             <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().mockDelay}</label>
             <input
               type="number"
@@ -204,7 +284,7 @@ export function MockRuleEditor({
         </div>
 
         {/* Status Presets */}
-        <div>
+        <div className={mode === 'mock' ? '' : 'hidden'}>
           <label className="text-xs font-medium mb-1.5 block text-[var(--color-text)]">{t().statusPresets}</label>
           <div className="flex flex-wrap gap-1">
             {STATUS_PRESETS.map(preset => (
@@ -224,7 +304,7 @@ export function MockRuleEditor({
         </div>
 
         {/* Response Headers */}
-        <div>
+        <div className={mode === 'mock' ? '' : 'hidden'}>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs font-medium text-[var(--color-text)]">{t().mockResponseHeaders}</label>
             <button
@@ -263,14 +343,14 @@ export function MockRuleEditor({
         </div>
 
         {/* Response Body */}
-        <div>
+        <div className={mode === 'mock' ? '' : 'hidden'}>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs font-medium text-[var(--color-text)]">{t().mockResponseBody}</label>
             <button
               onClick={formatJson}
               className="text-[10px] text-purple-500 hover:text-purple-600"
             >
-              Format JSON
+              {t().formatJson}
             </button>
           </div>
           <textarea

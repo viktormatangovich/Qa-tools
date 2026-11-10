@@ -33,11 +33,11 @@ export function ConsoleErrorRow({
 
   const timeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000)
-    if (seconds < 60) return `${seconds}с назад`
+    if (seconds < 60) return t().secondsAgo(seconds)
     const minutes = Math.floor(seconds / 60)
-    if (minutes < 60) return `${minutes}м назад`
+    if (minutes < 60) return t().minutesAgo(minutes)
     const hours = Math.floor(minutes / 60)
-    return `${hours}ч назад`
+    return t().hoursAgo(hours)
   }
 
   return (

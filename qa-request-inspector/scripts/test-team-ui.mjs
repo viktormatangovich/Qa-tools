@@ -92,7 +92,7 @@ try {
   await ui.evaluate(async base=>{const tab=(await chrome.tabs.query({})).find(t=>t.url===base+'/');await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>{window.source=new EventSource('/events'); window.ws=new WebSocket(location.origin.replace('http','ws')+'/ws');}});},base);
   await ui.getByText(/^WebSocket и SSE/).click();
   await expect(ui.getByText('проверка SSE',{exact:true})).toBeVisible(); await expect(ui.getByText('проверка WebSocket',{exact:true})).toBeVisible(); report.push('Захват SSE и WebSocket через существующий CDP');
-  const dom = await worker.evaluate(async base=> { const tabs=await chrome.tabs.query({});const tab=tabs.find(t=>t.url===base+'/');return await chrome.tabs.sendMessage(tab.id,{type:'RUN_DOM_QA_CHECKS'}); },base);
+  const dom = await worker.evaluate(async base=> { const tabs=await chrome.tabs.query({});const tab=tabs.find(t=>t.url===base+'/');await chrome.scripting.executeScript({target:{tabId:tab.id},files:['content.js']});return await chrome.tabs.sendMessage(tab.id,{type:'RUN_DOM_QA_CHECKS'}); },base);
   expect(dom.findings.map(f=>f.type)).toEqual(expect.arrayContaining(['positive-tabindex','clickable-without-keyboard','low-contrast']));report.push('Проверки фокуса, клавиатуры и контраста');
   const width=await ui.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));expect(width.scroll).toBeLessThanOrEqual(width.client);report.push('Панель 360 px без горизонтального переполнения');
   await fs.mkdir(path.join(root,'qa-evidence'),{recursive:true});

@@ -16,387 +16,164 @@ import {
   List,
   Pause,
   Radio,
+  ScrollText,
   Search,
   Settings,
   Shield,
   Tag,
   Terminal,
+  Upload,
   X
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  BreakpointManager,
-  BugReportDialog,
-  CollectionManager,
-  CollectionViewer,
-  ConsoleErrorDetail,
-  ConsoleErrorRow,
-  DiffDialog,
-  FilterButton,
-  GroupedView,
-  MockManager,
-  RequestDetail,
-  RequestRow,
-  QACheckView,
-  SessionHistory,
-  SettingsPanel,
-  TagManager,
-  TimelineView
-} from './components';
-import type { FontSize } from './components';
+// Components are imported from their own files, not from the './components' barrel:
+// the barrel would pull the lazily loaded ones back into the start-up bundle.
+import { FilterButton } from './components/common/FilterButton';
+import { ConsoleErrorDetail } from './components/console/ConsoleErrorDetail';
+import { ConsoleErrorRow } from './components/console/ConsoleErrorRow';
+import { lazyComponent } from './components/lazy';
+import { RequestRow } from './components/requests/RequestRow';
+import { DiffDialog } from './components/views/DiffDialog';
+import { GroupedView } from './components/views/GroupedView';
+import { TimelineView } from './components/views/TimelineView';
+import { useCapture } from './hooks/useCapture';
+import { useCaptureSettings } from './hooks/useCaptureSettings';
+import { useCollections } from './hooks/useCollections';
+import { useJiraSettings } from './hooks/useJiraSettings';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { usePreferences } from './hooks/usePreferences';
+import { useQaAnalysis } from './hooks/useQaAnalysis';
+import { useRules } from './hooks/useRules';
+import { useSessions } from './hooks/useSessions';
+import { useStepRecorder } from './hooks/useStepRecorder';
+import { t } from './locales';
+import type { QAIssue, QAIssueCategory, QAIssueSeverity } from './qa';
+import { maskRequest, maskRequests } from './qa/masking';
+import type { NegativeScenario } from './qa/negativeTesting';
+import { createSessionReport, createSessionReportHtml, createSessionReportJson } from './qa/report';
 import type {
   ApiRequest,
-  BreakpointRule,
   ConsoleError,
   MockRule,
   RequestCollection,
   RequestTag,
-  RequestMeta,
+  ResourceType,
   SortOption,
   SortPresetId,
 } from './types';
-import { defaultQASettings, qaRulesEngine } from './qa';
-import type { DOMFinding, QAIssue, QAIssueCategory, QAIssueSeverity, QASettings } from './qa';
-import { contractCoverage, contractIssues, matchEndpoint, parseOpenApiSpec } from './qa/contract/contractChecker';
-import { createSessionReport, createSessionReportHtml, createSessionReportJson } from './qa/report';
-import { createNegativeMock } from './qa/negativeTesting';
-import { compareEnvironments } from './qa/environmentCompare';
-import { retainedSessions } from './qa/teamTools';
-import { TeamToolsPanel } from './components/qa/TeamToolsPanel';
-import type { OpenApiDocument } from './qa/contract/types';
-import {
-  generateClaudePrompt,
-  generateHar,
-  generateMarkdownReport,
-  generatePostmanCollection,
-  generateOpenApiSpec,
-  generateJsonSchema,
-  generateCsv,
-  generateBulkCurl,
-} from './utils';
-import { t } from './locales';
-import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { downloadFile, today } from './utils/download';
+import { generateBulkCurl, generateCsv, generateJsonSchema, generateOpenApiSpec } from './utils/exporters';
+import { generateClaudePrompt, generateHar, generateMarkdownReport, generatePostmanCollection } from './utils/generators';
+import { filterRequests, groupByDomain, isFailed, isSlow, SORT_PRESETS, sortRequests, type RequestFilter } from './utils/requestList';
+
+// Dialogs and tabs that most sessions never open are downloaded on first use.
+const RequestDetail = lazyComponent(() => import('./components/detail/RequestDetail').then((module) => module.RequestDetail));
+const QACheckView = lazyComponent(() => import('./components/qa/QACheckView').then((module) => module.QACheckView));
+const TeamToolsPanel = lazyComponent(() => import('./components/qa/TeamToolsPanel').then((module) => module.TeamToolsPanel));
+const BugReportDialog = lazyComponent(() => import('./components/qa/BugReportDialog').then((module) => module.BugReportDialog));
+const MockManager = lazyComponent(() => import('./components/mocks/MockManager').then((module) => module.MockManager));
+const PausedRequestDialog = lazyComponent(() => import('./components/breakpoints/PausedRequestDialog').then((module) => module.PausedRequestDialog));
+const BreakpointManager = lazyComponent(() => import('./components/breakpoints/BreakpointManager').then((module) => module.BreakpointManager));
+const SessionHistory = lazyComponent(() => import('./components/sessions/SessionHistory').then((module) => module.SessionHistory));
+const SettingsPanel = lazyComponent(() => import('./components/settings/SettingsPanel').then((module) => module.SettingsPanel));
+const CollectionManager = lazyComponent(() => import('./components/collections/CollectionManager').then((module) => module.CollectionManager));
+const CollectionViewer = lazyComponent(() => import('./components/collections/CollectionViewer').then((module) => module.CollectionViewer));
+const TagManager = lazyComponent(() => import('./components/collections/TagManager').then((module) => module.TagManager));
+
+const sortPresets = SORT_PRESETS;
+
+/** Resource kinds offered as a filter when everything is captured, not only API calls. */
+const TYPE_FILTERS: Array<'all' | 'api' | ResourceType> = ['all', 'api', 'document', 'script', 'stylesheet', 'image', 'font', 'media', 'other'];
 
 export default function App() {
-  const [requests, setRequests] = useState<ApiRequest[]>([]);
-  const [consoleErrors, setConsoleErrors] = useState<ConsoleError[]>([]);
-  const [selectedRequest, setSelectedRequest] = useState<ApiRequest | null>(
-    null
-  );
+  // ---- What is selected and shown -------------------------------------------------------------
+  const [selectedRequest, setSelectedRequest] = useState<ApiRequest | null>(null);
   const [selectedError, setSelectedError] = useState<ConsoleError | null>(null);
-  const [filter, setFilter] = useState<'all' | 'errors' | 'slow' | 'console' | 'qa'>(
-    'all'
-  );
+  const [filter, setFilter] = useState<RequestFilter>('all');
   const [qaFilter, setQaFilter] = useState<'all' | QAIssueSeverity | QAIssueCategory>('all');
-  const [domFindings, setDomFindings] = useState<DOMFinding[]>([]);
-  const [domChecksLoading, setDomChecksLoading] = useState(false);
-  const [qaSettings, setQASettings] = useState<QASettings>(defaultQASettings);
-  const [dismissedQAIssueIds, setDismissedQAIssueIds] = useState<Set<string>>(() => new Set());
-  const [excludedQARuleIds, setExcludedQARuleIds] = useState<string[]>([]);
-  const [contractSpecText, setContractSpecText] = useState('');
-  const [bugReportIssue, setBugReportIssue] = useState<QAIssue | null>(null);
   const [urlFilter, setUrlFilter] = useState('');
-  const [copied, setCopied] = useState(false);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const [autoSelect, setAutoSelect] = useState(false);
-  const [mockRules, setMockRules] = useState<MockRule[]>([]);
-  const [showMockManager, setShowMockManager] = useState(false);
-  const [mockInitialRule, setMockInitialRule] = useState<MockRule | null>(null);
-  const [breakpointRules, setBreakpointRules] = useState<BreakpointRule[]>([]);
-  const [showBreakpointManager, setShowBreakpointManager] = useState(false);
-  const [favorites, setFavorites] = useState<string[]>([]); // Array of request IDs
-  const [showSessionHistory, setShowSessionHistory] = useState(false);
-  const [sessions, setSessions] = useState<
-    Array<{ id: string; name: string; timestamp: number; count: number }>
-  >([]);
-  const [showExportMenu, setShowExportMenu] = useState(false);
-
-  // New features state
-  const [compareMode, setCompareMode] = useState(false);
-  const [compareRequests, setCompareRequests] = useState<
-    [ApiRequest | null, ApiRequest | null]
-  >([null, null]);
-  const [showDiff, setShowDiff] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'timeline' | 'grouped'>(
-    'grouped'
-  );
   const [bodySearch, setBodySearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'api' | ResourceType>('all');
+  const harInputRef = useRef<HTMLInputElement>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'timeline' | 'grouped'>('grouped');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [sortPreset, setSortPreset] = useState<SortPresetId | ''>('');
+  const [autoSelect, setAutoSelect] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Sort presets definition
-  const sortPresets: Array<{
-    id: SortPresetId;
-    labelKey: keyof ReturnType<typeof t>;
-    comparators: Array<(a: ApiRequest, b: ApiRequest) => number>;
-  }> = useMemo(() => [
-    {
-      id: 'method-status',
-      labelKey: 'sortPresetMethodStatus',
-      comparators: [
-        (a, b) => a.method.localeCompare(b.method),
-        (a, b) => (b.status || 0) - (a.status || 0),
-      ],
-    },
-    {
-      id: 'method-type',
-      labelKey: 'sortPresetMethodType',
-      comparators: [
-        (a, b) => a.method.localeCompare(b.method),
-        (a, b) => a.type.localeCompare(b.type),
-      ],
-    },
-    {
-      id: 'status-method',
-      labelKey: 'sortPresetStatusMethod',
-      comparators: [
-        (a, b) => (b.status || 0) - (a.status || 0),
-        (a, b) => a.method.localeCompare(b.method),
-      ],
-    },
-    {
-      id: 'type-method',
-      labelKey: 'sortPresetTypeMethod',
-      comparators: [
-        (a, b) => a.type.localeCompare(b.type),
-        (a, b) => a.method.localeCompare(b.method),
-      ],
-    },
-    {
-      id: 'type-status',
-      labelKey: 'sortPresetTypeStatus',
-      comparators: [
-        (a, b) => a.type.localeCompare(b.type),
-        (a, b) => (b.status || 0) - (a.status || 0),
-      ],
-    },
-  ], []);
-
-  // Group selection state
-  const [groupSelectionMode, setGroupSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  // Collections & Tags state
-  const [collections, setCollections] = useState<RequestCollection[]>([]);
-  const [tags, setTags] = useState<RequestTag[]>([]);
-  const [requestMeta, setRequestMeta] = useState<Record<string, RequestMeta>>({});
+  // Dialogs
+  const [bugReportIssue, setBugReportIssue] = useState<QAIssue | null>(null);
+  const [showMockManager, setShowMockManager] = useState(false);
+  const [mockInitialRule, setMockInitialRule] = useState<MockRule | null>(null);
+  const [showBreakpointManager, setShowBreakpointManager] = useState(false);
+  const [showSessionHistory, setShowSessionHistory] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showCollectionManager, setShowCollectionManager] = useState(false);
   const [viewingCollection, setViewingCollection] = useState<RequestCollection | null>(null);
   const [showTagManager, setShowTagManager] = useState(false);
 
-  // Debugger state
-  const [debuggerStatus, setDebuggerStatus] = useState<'attached' | 'detached' | 'error'>('detached');
-  const [debuggerError, setDebuggerError] = useState<string | null>(null);
-  const [pausedRequest, setPausedRequest] = useState<{ requestId: string; url: string; method: string } | null>(null);
-  const portRef = useRef<chrome.runtime.Port | null>(null);
+  // Comparing two requests
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareRequests, setCompareRequests] = useState<[ApiRequest | null, ApiRequest | null]>([null, null]);
+  const [showDiff, setShowDiff] = useState(false);
 
-  // Settings state
-  const [showSettings, setShowSettings] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
-  const [fontSize, setFontSize] = useState<FontSize>('medium');
+  // Group selection
+  const [groupSelectionMode, setGroupSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // The engine only runs when captured data changes, never during unrelated UI renders.
-  const contractDocument = useMemo<OpenApiDocument | null>(() => {
-    if (!contractSpecText.trim()) return null;
-    try { return parseOpenApiSpec(contractSpecText); } catch { return null; }
-  }, [contractSpecText]);
-  const contractError = useMemo(() => {
-    if (!contractSpecText.trim()) return null;
-    try { parseOpenApiSpec(contractSpecText); return null; } catch (error) { return (error as Error).message; }
-  }, [contractSpecText]);
-  const qaIssues = useMemo(() => !qaSettings.autoQAEnabled ? [] : [...qaRulesEngine.analyze({
-    requests,
-    consoleErrors,
-    domFindings,
-    settings: qaSettings,
-  }), ...(contractDocument && qaSettings.contractValidationEnabled ? contractIssues(contractDocument, requests) : [])]
-    .filter((issue) => !dismissedQAIssueIds.has(issue.id) && !excludedQARuleIds.includes(issue.ruleId)), [requests, consoleErrors, domFindings, qaSettings, contractDocument, dismissedQAIssueIds, excludedQARuleIds]);
-  const coverage = useMemo(() => contractDocument && qaSettings.contractValidationEnabled ? contractCoverage(contractDocument, requests) : null, [contractDocument, requests, qaSettings.contractValidationEnabled]);
-  const contractStatusByRequest = useMemo(() => new Map(requests.map((request) => {
-    if (!contractDocument) return [request.id, undefined] as const;
-    if (!matchEndpoint(contractDocument, request)) return [request.id, 'undocumented'] as const;
-    return [request.id, qaIssues.some((issue) => issue.category === 'contract' && issue.requestId === request.id) ? 'failed' : 'passed'] as const;
-  })), [requests, contractDocument, qaIssues]);
-
-  // Connect to background via port (triggers debugger attach)
-  useEffect(() => {
-    const port = chrome.runtime.connect({ name: 'sidepanel' });
-    portRef.current = port;
-
-    port.onDisconnect.addListener(() => {
-      portRef.current = null;
-      setDebuggerStatus('detached');
-    });
-
-    return () => {
-      port.disconnect();
-      portRef.current = null;
-    };
+  // ---- State that lives in hooks --------------------------------------------------------------
+  const clearDomFindingsRef = useRef<() => void>(() => {});
+  const handleTabChanged = useCallback(() => {
+    setSelectedRequest(null);
+    setSelectedError(null);
+    clearDomFindingsRef.current();
   }, []);
 
-  // Load mock and breakpoint rules on mount
+  const { captureSettings, updateCaptureSettings } = useCaptureSettings();
+  const {
+    requests, consoleErrors, debuggerStatus, debuggerError, pausedRequests, capturedTabId, snapshot,
+    reconnectDebugger, resumePausedRequest, replaceRequests, showSnapshot, returnToCapture, captureScreenshot,
+    clearRequests: clearCapturedRequests, clearConsoleErrors: clearCapturedErrors,
+  } = useCapture(handleTabChanged, captureSettings.maxRequests);
+
+  // Recorded steps are linked to the requests captured after them.
+  const requestsRef = useRef(requests);
+  useEffect(() => {
+    requestsRef.current = requests;
+  }, [requests]);
+  const requestIdsSince = useCallback(
+    (since: number) => requestsRef.current.filter((request) => request.timestamp >= since).map((request) => request.id),
+    [],
+  );
+  const recorder = useStepRecorder(capturedTabId, requestIdsSince);
+  const { jiraSettings, saveJiraSettings } = useJiraSettings();
+
+  const {
+    qaSettings, contractSpecText, excludedQARuleIds, domChecksLoading, contractDocument, contractError,
+    qaIssues, coverage, contractStatusByRequest, handleQASettingsChange, handleContractSpecChange,
+    handleDismissQAIssue, handleExcludeQARule, handleRestoreExcludedQARules, setExcludedRules,
+    runDomChecks, highlightQAIssue, clearDomFindings,
+  } = useQaAnalysis(requests, consoleErrors);
+  useEffect(() => {
+    clearDomFindingsRef.current = clearDomFindings;
+  }, [clearDomFindings]);
+
+  const {
+    darkMode, fontSize, maskSecretsOnExport, language,
+    handleDarkModeChange, handleFontSizeChange, handleMaskSecretsChange, handleLanguageChange,
+  } = usePreferences();
+  const { mockRules, breakpointRules, saveMockRules, saveBreakpointRules } = useRules();
+  const { sessions, saveSession: storeSession, loadSessionRequests, deleteSession, updateSession, compareSessions } = useSessions();
+  const {
+    collections, tags, requestMeta, favorites, toggleFavorite, createCollection, deleteCollection,
+    addToCollection, addRequestToCollection, removeFromCollection, createTag, deleteTag, togglePin,
+  } = useCollections();
+
   // Clean up copy timer on unmount
   useEffect(() => {
     return () => clearTimeout(copyTimerRef.current);
-  }, []);
-
-  useEffect(() => {
-    chrome.runtime.sendMessage({ type: 'GET_MOCK_RULES' }, (response) => {
-      if (response?.rules) {
-        setMockRules(response.rules);
-      }
-    });
-    chrome.runtime.sendMessage({ type: 'GET_BREAKPOINT_RULES' }, (response) => {
-      if (response?.rules) {
-        setBreakpointRules(response.rules);
-      }
-    });
-  }, []);
-
-  // Load favorites, sessions, collections, tags, requestMeta, and settings from storage
-  useEffect(() => {
-    chrome.storage.local.get(
-      ['favorites', 'sessions', 'darkMode', 'fontSize', 'collections', 'tags', 'requestMeta', 'qaSettings', 'contractSpecText', 'excludedQARuleIds'],
-      (result: {
-        favorites?: string[];
-        sessions?: Array<{
-          id: string;
-          name: string;
-          timestamp: number;
-          count: number;
-        }>;
-        darkMode?: boolean;
-        fontSize?: FontSize;
-        collections?: RequestCollection[];
-        tags?: RequestTag[];
-        requestMeta?: Record<string, RequestMeta>;
-        qaSettings?: QASettings;
-        contractSpecText?: string;
-        excludedQARuleIds?: string[];
-      }) => {
-        if (result.favorites) setFavorites(result.favorites);
-        if (result.sessions) setSessions(retainedSessions(result.sessions));
-        if (result.darkMode !== undefined) setDarkMode(result.darkMode);
-        if (result.fontSize) setFontSize(result.fontSize);
-        if (result.collections) {
-          // Migrate old collections that don't have the `requests` field
-          const migrated = result.collections.map(c => ({
-            ...c,
-            requests: c.requests || [],
-          }));
-          setCollections(migrated);
-        }
-        if (result.tags) setTags(result.tags);
-        if (result.requestMeta) setRequestMeta(result.requestMeta);
-        if (result.qaSettings) setQASettings({ ...defaultQASettings, ...result.qaSettings });
-        if (result.contractSpecText) setContractSpecText(result.contractSpecText);
-        if (result.excludedQARuleIds) setExcludedQARuleIds(result.excludedQARuleIds);
-      }
-    );
-  }, []);
-
-  // Apply dark mode and font size to document
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    document.documentElement.setAttribute('data-font-size', fontSize);
-  }, [darkMode, fontSize]);
-
-  // Save settings when they change
-  const handleDarkModeChange = useCallback((enabled: boolean) => {
-    setDarkMode(enabled);
-    chrome.storage.local.set({ darkMode: enabled });
-  }, []);
-
-  const handleFontSizeChange = useCallback((size: FontSize) => {
-    setFontSize(size);
-    chrome.storage.local.set({ fontSize: size });
-  }, []);
-
-  const handleQASettingsChange = useCallback((settings: QASettings) => {
-    setQASettings(settings);
-    chrome.storage.local.set({ qaSettings: settings });
-  }, []);
-
-  const handleContractSpecChange = useCallback((text: string) => {
-    setContractSpecText(text);
-    chrome.storage.local.set({ contractSpecText: text });
-  }, []);
-
-  const handleDismissQAIssue = useCallback((issue: QAIssue) => {
-    setDismissedQAIssueIds((previous) => new Set(previous).add(issue.id));
-  }, []);
-
-  const handleExcludeQARule = useCallback((issue: QAIssue) => {
-    setExcludedQARuleIds((previous) => {
-      if (previous.includes(issue.ruleId)) return previous;
-      const next = [...previous, issue.ruleId];
-      chrome.storage.local.set({ excludedQARuleIds: next });
-      return next;
-    });
-  }, []);
-
-  const handleRestoreExcludedQARules = useCallback(() => {
-    setExcludedQARuleIds([]);
-    chrome.storage.local.set({ excludedQARuleIds: [] });
-  }, []);
-
-  // Load existing requests and console errors, listen for new ones
-  useEffect(() => {
-    // Get existing requests
-    chrome.runtime.sendMessage({ type: 'GET_API_REQUESTS' }, (response) => {
-      if (response?.requests) {
-        setRequests(response.requests);
-      }
-    });
-
-    // Get existing console errors
-    chrome.runtime.sendMessage({ type: 'GET_CONSOLE_ERRORS' }, (response) => {
-      if (response?.errors) {
-        setConsoleErrors(response.errors);
-      }
-    });
-
-    // Listen for new requests, errors, and debugger status
-    const handleMessage = (message: Record<string, unknown>) => {
-      if (message.type === 'SESSION_HISTORY_CHANGED') setSessions(message.payload as import('./types').Session[]);
-      if (message.type === 'NEW_API_REQUEST') {
-        setRequests((prev) =>
-          [message.payload as ApiRequest, ...prev].slice(0, 100)
-        );
-      }
-      if (message.type === 'NEW_CONSOLE_ERROR') {
-        setConsoleErrors((prev) =>
-          [message.payload as ConsoleError, ...prev].slice(0, 50)
-        );
-      }
-      if (message.type === 'DEBUGGER_STATUS') {
-        const status = message.status as 'attached' | 'detached' | 'error';
-        setDebuggerStatus(status);
-        if (status === 'error') {
-          setDebuggerError(message.error as string);
-        } else {
-          setDebuggerError(null);
-        }
-      }
-      if (message.type === 'BREAKPOINT_REQUEST_PAUSED') {
-        const req = message.request as { url: string; method: string };
-        setPausedRequest({
-          requestId: message.requestId as string,
-          url: req.url,
-          method: req.method,
-        });
-      }
-      if (message.type === 'BREAKPOINT_REQUEST_EXPIRED') {
-        setPausedRequest(null);
-      }
-    };
-
-    chrome.runtime.onMessage.addListener(handleMessage);
-    return () => chrome.runtime.onMessage.removeListener(handleMessage);
   }, []);
 
   // Auto-select new requests
@@ -406,303 +183,157 @@ export default function App() {
     }
   }, [autoSelect, requests]);
 
-  // Refresh when tab changes
-  useEffect(() => {
-    const handleTabChange = () => {
-      chrome.runtime.sendMessage({ type: 'GET_API_REQUESTS' }, (response) => {
-        if (response?.requests) {
-          setRequests(response.requests);
-          setSelectedRequest(null);
-        }
-      });
-      chrome.runtime.sendMessage({ type: 'GET_CONSOLE_ERRORS' }, (response) => {
-        if (response?.errors) {
-          setConsoleErrors(response.errors);
-          setSelectedError(null);
-        }
-      });
-      setDomFindings([]);
-    };
-
-    chrome.tabs.onActivated.addListener(handleTabChange);
-    return () => chrome.tabs.onActivated.removeListener(handleTabChange);
-  }, []);
-
-  const reconnectDebugger = useCallback(() => {
-    if (portRef.current) {
-      portRef.current.disconnect();
-    }
-    const port = chrome.runtime.connect({ name: 'sidepanel' });
-    portRef.current = port;
-    port.onDisconnect.addListener(() => {
-      portRef.current = null;
-      setDebuggerStatus('detached');
-    });
-  }, []);
-
-  const resumePausedRequest = useCallback((action: 'continue' | 'cancel') => {
-    if (!pausedRequest) return;
-    chrome.runtime.sendMessage({
-      type: 'RESUME_PAUSED_REQUEST',
-      requestId: pausedRequest.requestId,
-      action,
-    });
-    setPausedRequest(null);
-  }, [pausedRequest]);
-
+  // ---- Clearing -------------------------------------------------------------------------------
   const clearRequests = useCallback(() => {
-    chrome.runtime.sendMessage({ type: 'CLEAR_API_REQUESTS' }, () => {
-      setRequests([]);
-      setSelectedRequest(null);
-    });
-  }, []);
+    clearCapturedRequests();
+    setSelectedRequest(null);
+  }, [clearCapturedRequests]);
 
   const clearConsoleErrors = useCallback(() => {
-    chrome.runtime.sendMessage({ type: 'CLEAR_CONSOLE_ERRORS' }, () => {
-      setConsoleErrors([]);
-      setSelectedError(null);
-    });
-  }, []);
+    clearCapturedErrors();
+    setSelectedError(null);
+  }, [clearCapturedErrors]);
 
   const clearAll = useCallback(() => {
     clearRequests();
     clearConsoleErrors();
   }, [clearRequests, clearConsoleErrors]);
 
-  const runDomChecks = useCallback(async () => {
-    if (!qaSettings.accessibilityEnabled || !qaSettings.autoQAEnabled) return;
-    setDomChecksLoading(true);
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) return;
-      const result = await chrome.tabs.sendMessage(tab.id, { type: 'RUN_DOM_QA_CHECKS' }) as { findings?: DOMFinding[] } | undefined;
-      setDomFindings(result?.findings ?? []);
-    } catch {
-      // Browser pages and tabs without a content script cannot be scanned.
-      setDomFindings([]);
-    } finally {
-      setDomChecksLoading(false);
-    }
-  }, [qaSettings.accessibilityEnabled, qaSettings.autoQAEnabled]);
-
-  const highlightQAIssue = useCallback(async (issue: QAIssue) => {
-    const selector = issue.evidence?.selector;
-    if (typeof selector !== 'string' || !selector) return;
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) return;
-      await chrome.tabs.sendMessage(tab.id, { type: 'HIGHLIGHT_ELEMENTS', elements: [{ selector }], label: issue.title });
-    } catch {
-      // The content script is unavailable on browser pages or after navigation.
-    }
-  }, []);
-
-  const exportSessionReport = useCallback((format: 'md' | 'html' | 'json') => {
-    const report = format === 'md' ? createSessionReport(requests, consoleErrors, qaIssues) : format === 'html' ? createSessionReportHtml(requests, consoleErrors, qaIssues) : createSessionReportJson(requests, consoleErrors, qaIssues);
-    const contentType = format === 'md' ? 'text/markdown' : format === 'html' ? 'text/html' : 'application/json';
-    const url = URL.createObjectURL(new Blob([report], { type: contentType }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `qa-session-report-${new Date().toISOString().slice(0, 10)}.${format}`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }, [requests, consoleErrors, qaIssues]);
-
-  const compareSessions = useCallback(async (leftId: string, rightId: string) => {
-    const stored = await chrome.storage.local.get([`session_${leftId}`, `session_${rightId}`]) as Record<string, ApiRequest[] | undefined>;
-    const options = await chrome.storage.local.get("teamWorkspace") as { teamWorkspace?: { compareOptions: import("./qa/environmentCompare").CompareOptions } };
-    return compareEnvironments(stored[`session_${leftId}`] || [], stored[`session_${rightId}`] || [], options.teamWorkspace?.compareOptions);
-  }, []);
-
-  const saveMockRules = useCallback((rules: MockRule[]) => {
-    setMockRules(rules);
-    chrome.runtime.sendMessage({ type: 'SAVE_MOCK_RULES', payload: rules });
-  }, []);
-
-  const saveBreakpointRules = useCallback((rules: BreakpointRule[]) => {
-    setBreakpointRules(rules);
-    chrome.runtime.sendMessage({
-      type: 'SAVE_BREAKPOINT_RULES',
-      payload: rules,
-    });
-  }, []);
-
-  // Export to Postman collection
-  const exportToPostman = useCallback(() => {
-    const collection = generatePostmanCollection(requests);
-    const blob = new Blob([JSON.stringify(collection, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `api-debugger-${new Date()
-      .toISOString()
-      .slice(0, 10)}.postman_collection.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowExportMenu(false);
-  }, [requests]);
-
-  // Toggle favorite
-  const toggleFavorite = useCallback((requestId: string) => {
-    setFavorites((prev) => {
-      const newFavorites = prev.includes(requestId)
-        ? prev.filter((id) => id !== requestId)
-        : [...prev, requestId].slice(-200); // Cap at 200 to prevent unbounded growth
-      chrome.storage.local.set({ favorites: newFavorites });
-      return newFavorites;
-    });
-  }, []);
-
-  // Save current session
-  const saveSession = useCallback(async () => {
-    if (requests.length === 0) return;
-
-    const sessionId = crypto.randomUUID();
-    const sessionName = `Сессия ${new Date().toLocaleString("ru-RU")}`;
-    const newSession = {
-      id: sessionId,
-      name: sessionName,
-      timestamp: Date.now(),
-      count: requests.length,
-    };
-
-    // Save session metadata, evict oldest if over 20
-    const allSessions = [newSession, ...sessions];
-    const newSessions = retainedSessions(allSessions);
-    const evicted = allSessions.filter(s => !newSessions.some(item => item.id === s.id));
-    // Save session data before updating the visible list.
-    try { await chrome.storage.local.set({
-      sessions: newSessions,
-      [`session_${sessionId}`]: requests,
-    }); } catch { window.alert("Не удалось сохранить сессию: недостаточно места в хранилище расширения."); return; }
-    setSessions(newSessions);
-
-    // Clean up orphaned session data
-    if (evicted.length > 0) {
-      chrome.storage.local.remove(evicted.map(s => `session_${s.id}`));
-    }
-    setShowExportMenu(false);
-  }, [requests, sessions]);
-
-  // Load session
-  const loadSession = useCallback((sessionId: string) => {
-    chrome.storage.local.get(
-      [`session_${sessionId}`],
-      (result: Record<string, ApiRequest[] | undefined>) => {
-        const sessionData = result[`session_${sessionId}`];
-        if (sessionData) {
-          setRequests(sessionData);
-          setSelectedRequest(null);
-          setShowSessionHistory(false);
-        }
-      }
-    );
-  }, []);
-
-  // Delete session
-  const deleteSession = useCallback(
-    (sessionId: string) => {
-      const newSessions = sessions.filter((s) => s.id !== sessionId);
-      setSessions(newSessions);
-      chrome.storage.local.remove([`session_${sessionId}`]);
-      chrome.storage.local.set({ sessions: newSessions });
-    },
-    [sessions]
+  // ---- Export ---------------------------------------------------------------------------------
+  // Everything that leaves the browser goes through here: credentials are masked unless the user
+  // switched masking off in the settings. Masking is done at export time, not on every capture.
+  const forExport = useCallback(
+    (list: ApiRequest[]) => maskRequests(list, maskSecretsOnExport),
+    [maskSecretsOnExport],
+  );
+  const requestForExport = useCallback(
+    (request: ApiRequest | undefined) => (request && maskSecretsOnExport ? maskRequest(request) : request),
+    [maskSecretsOnExport],
   );
 
-  const filteredRequests = requests.filter((req) => {
-    // URL filter
-    if (
-      urlFilter &&
-      (!req.url || !req.url.toLowerCase().includes(urlFilter.toLowerCase()))
-    ) {
-      return false;
-    }
-    // Body search filter
-    if (bodySearch) {
-      const searchLower = bodySearch.toLowerCase();
-      const reqBody = req.requestBody
-        ? String(req.requestBody).toLowerCase()
-        : '';
-      const resBody = req.responseBody
-        ? JSON.stringify(req.responseBody).toLowerCase()
-        : '';
-      if (!reqBody.includes(searchLower) && !resBody.includes(searchLower)) {
-        return false;
-      }
-    }
-    // Status filter
-    if (filter === 'errors') return req.status >= 400 || req.error;
-    if (filter === 'slow') return req.duration > 1000;
-    return true;
-  });
+  const exportSessionReport = useCallback((format: 'md' | 'html' | 'json') => {
+    const exported = forExport(requests);
+    const report = format === 'md' ? createSessionReport(exported, consoleErrors, qaIssues) : format === 'html' ? createSessionReportHtml(exported, consoleErrors, qaIssues) : createSessionReportJson(exported, consoleErrors, qaIssues);
+    const contentType = format === 'md' ? 'text/markdown' : format === 'html' ? 'text/html' : 'application/json';
+    downloadFile(`qa-session-report-${today()}.${format}`, report, contentType);
+  }, [forExport, requests, consoleErrors, qaIssues]);
 
-  // Group requests by domain
-  const groupedRequests = filteredRequests.reduce((acc, req) => {
+  const exportToPostman = useCallback(() => {
+    downloadFile(`reqpane-${today()}.postman_collection.json`, JSON.stringify(generatePostmanCollection(forExport(requests)), null, 2), 'application/json');
+    setShowExportMenu(false);
+  }, [forExport, requests]);
+
+  const exportToHar = useCallback(() => {
+    downloadFile(`reqpane-${today()}.har`, JSON.stringify(generateHar(forExport(requests)), null, 2), 'application/json');
+  }, [forExport, requests]);
+
+  const exportToMarkdown = useCallback(() => {
+    const exported = forExport(requests);
+    // Get page info from the first request or use defaults
+    const pageInfo = exported.length > 0
+      ? { url: exported[0].pageUrl, title: exported[0].pageTitle }
+      : { url: t().unknown, title: t().unknown };
+    downloadFile(`api-report-${today()}.md`, generateMarkdownReport(exported, consoleErrors, pageInfo), 'text/markdown');
+    setShowExportMenu(false);
+  }, [forExport, requests, consoleErrors]);
+
+  const exportToOpenApi = useCallback(() => {
+    downloadFile(`openapi-${today()}.json`, generateOpenApiSpec(forExport(requests)), 'application/json');
+    setShowExportMenu(false);
+  }, [forExport, requests]);
+
+  const exportToJsonSchema = useCallback(() => {
+    const body = selectedRequest?.responseBody;
+    if (!body) return;
+    downloadFile(`json-schema-${today()}.json`, generateJsonSchema(body), 'application/json');
+    setShowExportMenu(false);
+  }, [selectedRequest]);
+
+  const exportToCsv = useCallback(() => {
+    downloadFile(`api-export-${today()}.csv`, generateCsv(forExport(requests)), 'text/csv');
+    setShowExportMenu(false);
+  }, [forExport, requests]);
+
+  const exportToBulkCurl = useCallback(() => {
+    downloadFile(`curl-collection-${today()}.sh`, generateBulkCurl(forExport(requests)), 'text/plain');
+    setShowExportMenu(false);
+  }, [forExport, requests]);
+
+  const exportSelected = useCallback(() => {
+    const selected = requests.filter((request) => selectedIds.has(request.id));
+    if (selected.length === 0) return;
+    downloadFile(`selected-curl-${today()}.sh`, generateBulkCurl(forExport(selected)), 'text/plain');
+  }, [forExport, requests, selectedIds]);
+
+  const copyToClipboard = useCallback(async (request: ApiRequest) => {
+    await navigator.clipboard.writeText(generateClaudePrompt(maskSecretsOnExport ? maskRequest(request) : request));
+    setCopied(true);
+    clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+  }, [maskSecretsOnExport]);
+
+  // ---- Sessions -------------------------------------------------------------------------------
+  const saveSession = useCallback(async () => {
+    if (await storeSession(requests)) setShowExportMenu(false);
+  }, [storeSession, requests]);
+
+  const loadSession = useCallback(async (sessionId: string) => {
+    const saved = await loadSessionRequests(sessionId);
+    if (!saved) return;
+    showSnapshot(saved, { kind: 'session', name: sessions.find((session) => session.id === sessionId)?.name || '' });
+    setSelectedRequest(null);
+    setShowSessionHistory(false);
+  }, [loadSessionRequests, showSnapshot, sessions]);
+
+  // ---- HAR import -----------------------------------------------------------------------------
+  const importHar = useCallback(async (file: File | undefined) => {
+    if (!file) return;
     try {
-      const domain = new URL(req.url).hostname;
-      if (!acc[domain]) acc[domain] = [];
-      acc[domain].push(req);
+      const { parseHar } = await import('./utils/harImport');
+      const imported = parseHar(await file.text());
+      if (imported.length === 0) throw new Error('empty');
+      showSnapshot(imported, { kind: 'har', name: file.name });
+      setSelectedRequest(null);
+      setFilter('all');
+      setShowExportMenu(false);
     } catch {
-      if (!acc['unknown']) acc['unknown'] = [];
-      acc['unknown'].push(req);
+      window.alert(t().importHarError);
     }
-    return acc;
-  }, {} as Record<string, ApiRequest[]>);
+  }, [showSnapshot]);
 
-  // Sort requests
-  const sortedRequests = useMemo(() => {
-    const sorted = [...filteredRequests];
+  // ---- Mocks ----------------------------------------------------------------------------------
+  const openMockFor = useCallback((rule: MockRule) => {
+    saveMockRules([...mockRules, rule]);
+    setMockInitialRule(rule);
+    setShowMockManager(true);
+  }, [mockRules, saveMockRules]);
 
-    // If a sort preset is active, apply multi-criteria sort
-    if (sortPreset) {
-      const preset = sortPresets.find(p => p.id === sortPreset);
-      if (preset) {
-        sorted.sort((a, b) => {
-          for (const cmp of preset.comparators) {
-            const result = cmp(a, b);
-            if (result !== 0) return result;
-          }
-          return 0;
-        });
-        return sorted;
-      }
-    }
+  const createNegativeMockFor = useCallback(async (request: ApiRequest, scenario: NegativeScenario) => {
+    // negativeTesting depends on the contract checker; it is loaded with the request detail anyway.
+    const { createNegativeMock } = await import('./qa/negativeTesting');
+    openMockFor(createNegativeMock(request, scenario));
+  }, [openMockFor]);
 
-    // Otherwise use single-criteria sort
-    switch (sortBy) {
-      case 'newest':
-        sorted.sort((a, b) => b.timestamp - a.timestamp);
-        break;
-      case 'oldest':
-        sorted.sort((a, b) => a.timestamp - b.timestamp);
-        break;
-      case 'method':
-        sorted.sort((a, b) => a.method.localeCompare(b.method));
-        break;
-      case 'status':
-        sorted.sort((a, b) => (b.status || 0) - (a.status || 0));
-        break;
-      case 'duration':
-        sorted.sort((a, b) => b.duration - a.duration);
-        break;
-      case 'type':
-        sorted.sort((a, b) => a.type.localeCompare(b.type));
-        break;
-      case 'domain':
-        sorted.sort((a, b) => {
-          try {
-            return new URL(a.url).hostname.localeCompare(new URL(b.url).hostname);
-          } catch {
-            return 0;
-          }
-        });
-        break;
-    }
-    return sorted;
-  }, [filteredRequests, sortBy, sortPreset, sortPresets]);
+  // ---- Request list ---------------------------------------------------------------------------
+  const hasOtherResources = useMemo(
+    () => requests.some((request) => request.type !== 'xhr' && request.type !== 'fetch'),
+    [requests],
+  );
+  const filteredRequests = useMemo(() => {
+    const byType = typeFilter === 'all' || !hasOtherResources
+      ? requests
+      : requests.filter((request) => (typeFilter === 'api' ? request.type === 'xhr' || request.type === 'fetch' : request.type === typeFilter));
+    return filterRequests(byType, { filter, urlFilter, bodySearch });
+  }, [requests, typeFilter, hasOtherResources, filter, urlFilter, bodySearch]);
+  const groupedRequests = useMemo(() => groupByDomain(filteredRequests), [filteredRequests]);
+  const sortedRequests = useMemo(
+    () => sortRequests(filteredRequests, sortBy, sortPreset),
+    [filteredRequests, sortBy, sortPreset],
+  );
+
+  const apiErrorCount = requests.filter(isFailed).length;
+  const slowCount = requests.filter(isSlow).length;
+  const consoleErrorCount = consoleErrors.length;
 
   // Toggle request for comparison
   const toggleCompareRequest = useCallback((req: ApiRequest) => {
@@ -714,218 +345,6 @@ export default function App() {
       return [req, prev[1]]; // Replace first if both selected
     });
   }, []);
-
-  const apiErrorCount = requests.filter(
-    (r) => r.status >= 400 || r.error
-  ).length;
-  const slowCount = requests.filter((r) => r.duration > 1000).length;
-  const consoleErrorCount = consoleErrors.length;
-
-  const copyToClipboard = useCallback(async (req: ApiRequest) => {
-    const markdown = generateClaudePrompt(req);
-    await navigator.clipboard.writeText(markdown);
-    setCopied(true);
-    clearTimeout(copyTimerRef.current);
-    copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
-  }, []);
-
-  const exportToHar = useCallback(() => {
-    const har = generateHar(requests);
-    const blob = new Blob([JSON.stringify(har, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `api-debugger-${new Date().toISOString().slice(0, 10)}.har`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [requests]);
-
-  const exportToMarkdown = useCallback(() => {
-    // Get page info from the first request or use defaults
-    const pageInfo = requests.length > 0
-      ? { url: requests[0].pageUrl, title: requests[0].pageTitle }
-      : { url: 'Неизвестно', title: 'Неизвестно' };
-
-    const report = generateMarkdownReport(requests, consoleErrors, pageInfo);
-    const blob = new Blob([report], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `api-report-${new Date().toISOString().slice(0, 10)}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowExportMenu(false);
-  }, [requests, consoleErrors]);
-
-  // New export functions
-  const exportToOpenApi = useCallback(() => {
-    const spec = generateOpenApiSpec(requests);
-    const blob = new Blob([spec], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `openapi-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowExportMenu(false);
-  }, [requests]);
-
-  const exportToJsonSchema = useCallback(() => {
-    const selected = selectedRequest?.responseBody;
-    if (!selected) return;
-    const schema = generateJsonSchema(selected);
-    const blob = new Blob([schema], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `json-schema-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowExportMenu(false);
-  }, [selectedRequest]);
-
-  const exportToCsv = useCallback(() => {
-    const csv = generateCsv(requests);
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `api-export-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowExportMenu(false);
-  }, [requests]);
-
-  const exportToBulkCurl = useCallback(() => {
-    const curl = generateBulkCurl(requests);
-    const blob = new Blob([curl], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `curl-collection-${new Date().toISOString().slice(0, 10)}.sh`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowExportMenu(false);
-  }, [requests]);
-
-  // Collections management
-  const createCollection = useCallback((name: string, description?: string, color?: string) => {
-    const newCollection: RequestCollection = {
-      id: crypto.randomUUID(),
-      name,
-      description: description || '',
-      color: color || '#2563EB',
-      requestIds: [],
-      requests: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    const updated = [...collections, newCollection];
-    setCollections(updated);
-    chrome.storage.local.set({ collections: updated });
-  }, [collections]);
-
-  const deleteCollection = useCallback((collectionId: string) => {
-    const updated = collections.filter(c => c.id !== collectionId);
-    setCollections(updated);
-    // Also remove collectionId from requestMeta
-    const newMeta = { ...requestMeta };
-    Object.keys(newMeta).forEach(id => {
-      if (newMeta[id].collectionId === collectionId) {
-        const { collectionId: _, ...rest } = newMeta[id];
-        newMeta[id] = rest as RequestMeta;
-      }
-    });
-    setRequestMeta(newMeta);
-    chrome.storage.local.set({ collections: updated, requestMeta: newMeta });
-  }, [collections, requestMeta]);
-
-  const addToCollection = useCallback((collectionId: string, requestIds: string[], reqs?: ApiRequest[]) => {
-    const updated = collections.map(c => {
-      if (c.id !== collectionId) return c;
-      const newIds = [...new Set([...c.requestIds, ...requestIds])];
-      // Merge new requests, avoid duplicates by id
-      const existingIds = new Set(c.requests.map(r => r.id));
-      const newReqs = (reqs || []).filter(r => !existingIds.has(r.id));
-      return {
-        ...c,
-        requestIds: newIds,
-        requests: [...c.requests, ...newReqs],
-        updatedAt: Date.now(),
-      };
-    });
-    setCollections(updated);
-    // Update requestMeta
-    const newMeta = { ...requestMeta };
-    requestIds.forEach(id => {
-      newMeta[id] = { ...(newMeta[id] || {}), collectionId } as RequestMeta;
-    });
-    setRequestMeta(newMeta);
-    chrome.storage.local.set({ collections: updated, requestMeta: newMeta });
-  }, [collections, requestMeta]);
-
-  /** Add a single request to a collection */
-  const addRequestToCollection = useCallback((collectionId: string, request: ApiRequest) => {
-    addToCollection(collectionId, [request.id], [request]);
-  }, [addToCollection]);
-
-  const removeFromCollection = useCallback((collectionId: string, requestId: string) => {
-    const updated = collections.map(c => {
-      if (c.id !== collectionId) return c;
-      return {
-        ...c,
-        requestIds: c.requestIds.filter(id => id !== requestId),
-        requests: c.requests.filter(r => r.id !== requestId),
-        updatedAt: Date.now(),
-      };
-    });
-    setCollections(updated);
-    // Update requestMeta
-    const newMeta = { ...requestMeta };
-    if (newMeta[requestId]?.collectionId === collectionId) {
-      const { collectionId: _, ...rest } = newMeta[requestId];
-      newMeta[requestId] = rest as RequestMeta;
-    }
-    setRequestMeta(newMeta);
-    chrome.storage.local.set({ collections: updated, requestMeta: newMeta });
-  }, [collections, requestMeta]);
-
-  // Tags management
-  const createTag = useCallback((name: string, color: string) => {
-    const newTag: RequestTag = {
-      id: crypto.randomUUID(),
-      name,
-      color,
-    };
-    const updated = [...tags, newTag];
-    setTags(updated);
-    chrome.storage.local.set({ tags: updated });
-  }, [tags]);
-
-  const deleteTag = useCallback((tagId: string) => {
-    const updated = tags.filter(t => t.id !== tagId);
-    setTags(updated);
-    // Remove tag from all requestMeta
-    const newMeta = { ...requestMeta };
-    Object.keys(newMeta).forEach(id => {
-      if (newMeta[id]?.tags?.includes(tagId)) {
-        newMeta[id] = { ...newMeta[id], tags: newMeta[id].tags!.filter(t => t !== tagId) };
-      }
-    });
-    setRequestMeta(newMeta);
-    chrome.storage.local.set({ tags: updated, requestMeta: newMeta });
-  }, [tags, requestMeta]);
-
-  // Pin/unpin
-  const togglePin = useCallback((requestId: string) => {
-    const newMeta = { ...requestMeta };
-    const current = newMeta[requestId] || {} as RequestMeta;
-    newMeta[requestId] = { ...current, pinned: !current.pinned };
-    setRequestMeta(newMeta);
-    chrome.storage.local.set({ requestMeta: newMeta });
-  }, [requestMeta]);
 
   // Group selection
   const toggleGroupSelect = useCallback((requestId: string) => {
@@ -949,33 +368,18 @@ export default function App() {
   }, []);
 
   const deleteSelected = useCallback(() => {
-    const remaining = requests.filter(r => !selectedIds.has(r.id));
-    setRequests(remaining);
+    replaceRequests(requests.filter(r => !selectedIds.has(r.id)));
     setSelectedIds(new Set());
-    chrome.runtime.sendMessage({ type: 'SET_API_REQUESTS', payload: remaining });
-  }, [requests, selectedIds]);
-
-  const exportSelected = useCallback(() => {
-    const selectedReqs = requests.filter(r => selectedIds.has(r.id));
-    if (selectedReqs.length === 0) return;
-    const curl = generateBulkCurl(selectedReqs);
-    const blob = new Blob([curl], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `selected-curl-${new Date().toISOString().slice(0, 10)}.sh`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [requests, selectedIds]);
+  }, [replaceRequests, requests, selectedIds]);
 
   // Integrate keyboard shortcuts
   useKeyboardShortcuts({
     'ctrl+f': () => {
-      const input = document.querySelector<HTMLInputElement>('input[placeholder*="URL"]');
+      const input = document.querySelector<HTMLInputElement>('input[data-search="url"]');
       input?.focus();
     },
     'ctrl+shift+f': () => {
-      const input = document.querySelector<HTMLInputElement>('input[placeholder*="теле"]');
+      const input = document.querySelector<HTMLInputElement>('input[data-search="body"]');
       input?.focus();
     },
     'ctrl+e': () => setShowExportMenu(prev => !prev),
@@ -998,7 +402,7 @@ export default function App() {
   });
 
   return (
-    <div className="app-shell flex flex-col">
+    <div className="app-shell flex flex-col" key={language}>
       {/* Header */}
       <header className="px-4 pt-5 pb-4 border-b border-[var(--color-border)]">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -1017,6 +421,12 @@ export default function App() {
                   : debuggerStatus === 'error'
                     ? (debuggerError || t().cannotCapture)
                     : t().notCapturing}
+                {captureSettings.throttle !== 'none' && (
+                  <span className="ml-1 rounded bg-amber-100 px-1 text-amber-700" title={t().throttling}>{t().throttleLabels[captureSettings.throttle]}</span>
+                )}
+                {recorder.recording && (
+                  <button onClick={recorder.stop} className="ml-1 rounded bg-red-500 px-1 text-white" title={t().stopRecording(recorder.steps.length)}>● REC {recorder.steps.length}</button>
+                )}
               </p>
             </div>
           </div>
@@ -1040,6 +450,17 @@ export default function App() {
               title={t().mockRulesActive(mockRules.filter((r) => r.enabled).length)}
             >
               <Shield className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => updateCaptureSettings({ preserveLog: !captureSettings.preserveLog })}
+              className={`p-1.5 rounded transition-colors ${captureSettings.preserveLog
+                ? 'bg-[var(--color-accent)] text-white'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
+                }`}
+              title={captureSettings.preserveLog ? t().preserveLogOn : t().preserveLogOff}
+              aria-pressed={captureSettings.preserveLog}
+            >
+              <ScrollText className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setAutoSelect(!autoSelect)}
@@ -1082,8 +503,7 @@ export default function App() {
             <div className="relative">
               <button
                 onClick={() => setShowExportMenu(!showExportMenu)}
-                disabled={requests.length === 0}
-                className="p-1.5 rounded transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)] disabled:opacity-30"
+                className="p-1.5 rounded transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]"
                 title={t().exportOptions}
               >
                 <Download className="w-3.5 h-3.5" />
@@ -1144,9 +564,26 @@ export default function App() {
                   >
                     <History className="w-3.5 h-3.5" /> {t().saveSession}
                   </button>
+                  <hr className="my-1 border-[var(--color-border)]" />
+                  <button
+                    onClick={() => harInputRef.current?.click()}
+                    className="w-full px-3 py-2 text-xs text-left hover:bg-[var(--color-hover)] flex items-center gap-2"
+                  >
+                    <Upload className="w-3.5 h-3.5" /> {t().importHar}
+                  </button>
                 </div>
               )}
             </div>
+            <input
+              ref={harInputRef}
+              type="file"
+              accept=".har,.json,application/json"
+              className="hidden"
+              onChange={(event) => {
+                void importHar(event.target.files?.[0]);
+                event.target.value = '';
+              }}
+            />
             <button
               onClick={() => setGroupSelectionMode(prev => !prev)}
               className={`p-1.5 rounded transition-colors ${groupSelectionMode
@@ -1206,9 +643,26 @@ export default function App() {
             count={qaIssues.length}
             isError
           >
-            QA-проверка
+            {t().qaCheck}
           </FilterButton>
         </div>
+
+        {/* Resource type filter: shown once something other than API calls is in the list */}
+        {hasOtherResources && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {TYPE_FILTERS.map((type) => (
+              <button
+                key={type}
+                onClick={() => setTypeFilter(type)}
+                className={`px-2 py-0.5 rounded text-[10px] ${typeFilter === type
+                  ? 'bg-[var(--color-accent)] text-white'
+                  : 'bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-muted)]'}`}
+              >
+                {type === 'all' ? t().all : type === 'api' ? 'XHR / Fetch' : t().resourceTypeLabels[type]}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* URL Filter */}
         <div className="relative mt-2">
@@ -1218,6 +672,7 @@ export default function App() {
             value={urlFilter}
             onChange={(e) => setUrlFilter(e.target.value)}
             placeholder={t().filterByUrl}
+            data-search="url"
             className="w-full pl-8 pr-8 py-1.5 text-xs rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
           />
           {urlFilter && (
@@ -1238,6 +693,7 @@ export default function App() {
             value={bodySearch}
             onChange={(e) => setBodySearch(e.target.value)}
             placeholder={t().searchInBody}
+            data-search="body"
             className="w-full pl-8 pr-8 py-1.5 text-xs rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
           />
           {bodySearch && (
@@ -1372,34 +828,21 @@ export default function App() {
         </div>
       )}
 
-      {/* Breakpoint paused banner */}
-      {pausedRequest && (
-        <div className="px-4 py-2 bg-red-50 dark:bg-red-950 border-b border-red-200 dark:border-red-800">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <Pause className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />
-              <span className="text-xs font-medium text-red-700 dark:text-red-300 shrink-0">
-                {pausedRequest.method}
-              </span>
-              <span className="text-xs text-red-600 dark:text-red-400 truncate">
-                {pausedRequest.url}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0 ml-2">
-              <button
-                onClick={() => resumePausedRequest('cancel')}
-                className="px-2 py-0.5 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 rounded text-xs hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
-              >
-                {t().cancel}
-              </button>
-              <button
-                onClick={() => resumePausedRequest('continue')}
-                className="px-2 py-0.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 transition-colors"
-              >
-                {t().continue}
-              </button>
-            </div>
-          </div>
+      {/* A saved session or an imported file is shown instead of live capture */}
+      {snapshot && (
+        <div className="px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 flex items-center justify-between gap-2 text-xs">
+          <span className="text-blue-700 dark:text-blue-300 truncate">
+            {snapshot.kind === 'har' ? t().snapshotHar(snapshot.name) : t().snapshotSession(snapshot.name)}
+          </span>
+          <button
+            onClick={() => {
+              returnToCapture();
+              setSelectedRequest(null);
+            }}
+            className="shrink-0 px-2 py-0.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 transition-colors"
+          >
+            {t().returnToCapture}
+          </button>
         </div>
       )}
 
@@ -1459,9 +902,9 @@ export default function App() {
       {/* Request List or Console Errors */}
       <div className="flex-1 overflow-auto">
         {filter === 'qa' ? (
-          <><TeamToolsPanel requests={requests} settings={qaSettings} contractSpecText={contractSpecText} excludedRuleIds={excludedQARuleIds} mockRules={mockRules} onSaveMocks={saveMockRules} onApplyProfile={profile => {
+          <><TeamToolsPanel requests={requests} settings={qaSettings} contractSpecText={contractSpecText} excludedRuleIds={excludedQARuleIds} mockRules={mockRules} maskSecrets={maskSecretsOnExport} recorder={recorder} onSaveMocks={saveMockRules} onApplyProfile={profile => {
             handleQASettingsChange(profile.qaSettings); handleContractSpecChange(profile.contractSpecText);
-            setExcludedQARuleIds(profile.excludedRuleIds); void chrome.storage.local.set({ excludedQARuleIds: profile.excludedRuleIds });
+            setExcludedRules(profile.excludedRuleIds);
             saveMockRules(profile.mockRules);
           }} />
           <QACheckView
@@ -1598,21 +1041,12 @@ export default function App() {
                 onCopy={() => copyToClipboard(selectedRequest)}
                 copied={copied}
                 mockRules={mockRules}
-                onCreateMock={(rule) => {
-                  saveMockRules([...mockRules, rule])
-                  setMockInitialRule(rule)
-                  setShowMockManager(true)
-                }}
+                onCreateMock={openMockFor}
                 onOpenMockManager={() => {
                   setMockInitialRule(null)
                   setShowMockManager(true)
                 }}
-                onCreateNegativeMock={(scenario) => {
-                  const rule = createNegativeMock(selectedRequest, scenario);
-                  saveMockRules([...mockRules, rule]);
-                  setMockInitialRule(rule);
-                  setShowMockManager(true);
-                }}
+                onCreateNegativeMock={(scenario) => void createNegativeMockFor(selectedRequest, scenario)}
                 contractDocument={contractDocument}
                 collections={collections}
                 onAddToCollection={addRequestToCollection}
@@ -1626,7 +1060,29 @@ export default function App() {
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
           <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl shadow-xl">
-            {bugReportIssue && <BugReportDialog issue={bugReportIssue} request={requests.find((request) => request.id === bugReportIssue.requestId)} onClose={() => setBugReportIssue(null)} />}
+            {bugReportIssue && <BugReportDialog issue={bugReportIssue} request={requestForExport(requests.find((request) => request.id === bugReportIssue.requestId))} jiraSettings={jiraSettings} onCaptureScreenshot={captureScreenshot} onClose={() => setBugReportIssue(null)} />}
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* A request stopped at a breakpoint: edit it, let it go or cancel it. Closing the sheet lets it go. */}
+      <Dialog.Root
+        open={pausedRequests.length > 0}
+        onOpenChange={(open) => {
+          if (!open && pausedRequests[0]) resumePausedRequest(pausedRequests[0], 'continue');
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
+            {pausedRequests[0] && (
+              <PausedRequestDialog
+                key={pausedRequests[0].requestId}
+                paused={pausedRequests[0]}
+                queued={pausedRequests.length - 1}
+                onResume={resumePausedRequest}
+              />
+            )}
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
@@ -1702,6 +1158,7 @@ export default function App() {
               sessions={sessions}
               onLoad={loadSession}
               onDelete={deleteSession}
+              onTogglePin={(sessionId, pinned) => updateSession(sessionId, { pinned })}
               onClose={() => setShowSessionHistory(false)}
             />
           </Dialog.Popup>
@@ -1718,8 +1175,16 @@ export default function App() {
               fontSize={fontSize}
               onDarkModeChange={handleDarkModeChange}
               onFontSizeChange={handleFontSizeChange}
+              maskSecretsOnExport={maskSecretsOnExport}
+              onMaskSecretsChange={handleMaskSecretsChange}
               qaSettings={qaSettings}
               onQASettingsChange={handleQASettingsChange}
+              captureSettings={captureSettings}
+              onCaptureSettingsChange={updateCaptureSettings}
+              language={language}
+              onLanguageChange={handleLanguageChange}
+              jiraSettings={jiraSettings}
+              onJiraSettingsChange={saveJiraSettings}
               onClose={() => setShowSettings(false)}
             />
           </Dialog.Popup>

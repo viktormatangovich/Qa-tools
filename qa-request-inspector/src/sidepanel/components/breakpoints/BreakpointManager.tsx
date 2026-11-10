@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Pause, Plus, X, ToggleLeft, ToggleRight, Settings, Trash2 } from 'lucide-react'
+import { t } from '../../locales'
 import type { BreakpointRule } from '../../types'
 import { BreakpointRuleEditor } from './BreakpointRuleEditor'
 
@@ -70,9 +71,9 @@ export function BreakpointManager({
       <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
         <div className="flex items-center gap-2">
           <Pause className="w-4 h-4 text-red-500" />
-          <span className="text-sm font-medium">Breakpoints</span>
+          <span className="text-sm font-medium">{t().breakpoints}</span>
           <span className="text-xs text-text-muted">
-            ({localRules.filter(r => r.enabled).length} active)
+            ({localRules.filter(r => r.enabled).length} {t().active})
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -80,7 +81,7 @@ export function BreakpointManager({
             onClick={addRule}
             className="flex items-center gap-1 px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
           >
-            <Plus className="w-3 h-3" /> Add
+            <Plus className="w-3 h-3" /> {t().addBreakpoint}
           </button>
           <button
             onClick={onClose}
@@ -95,8 +96,8 @@ export function BreakpointManager({
         {localRules.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-muted">
             <Pause className="w-12 h-12 mb-3 opacity-30" strokeWidth={1} />
-            <p className="text-sm">No breakpoints</p>
-            <p className="text-xs mt-1">Add a breakpoint to pause requests</p>
+            <p className="text-sm">{t().noBreakpoints}</p>
+            <p className="text-xs mt-1">{t().noBreakpointsDesc}</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
@@ -118,8 +119,11 @@ export function BreakpointManager({
                   }`}>
                     {rule.method}
                   </span>
+                  <span className="ml-2 text-[10px] text-text-muted">
+                    {rule.stage === 'response' ? t().breakpointStageResponse : t().breakpointStageRequest}
+                  </span>
                   <p className="text-xs font-mono text-text truncate mt-1">
-                    {rule.urlPattern || '(no pattern)'}
+                    {rule.urlPattern || t().noPattern}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">

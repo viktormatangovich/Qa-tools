@@ -52,3 +52,59 @@ The extension remains Manifest V3, ships no remote scripts, analytics, AI, telem
 - Threshold persistence and user-configurable ignore lists belong to the Settings milestone.
 - Contract, sensitive-data, reports, and negative testing are later milestones.
 - The current capture limits (100 requests and 50 console errors per tab) also bound the MVP analysis workload.
+
+## Changes in 2.1.0
+
+- **One panel per browser window.** The side panel connects with a port named `sidepanel:<windowId>`. `background.js` keeps a `panels` map (window → port and captured tab) and sends requests, console errors and debugger status over that port only, so panels in other windows never receive them. After connecting and after each tab switch the panel gets one `TAB_SNAPSHOT` message with everything captured for the tab.
+- **Service worker restarts.** Captured requests and console errors are mirrored to `chrome.storage.session` (`capture_<tabId>`, 2 MB per tab, older bodies replaced by a marker) and restored on start. The panel reconnects by itself.
+- **Rules.** Mock and breakpoint rules are cached in the worker; `chrome.storage.onChanged` invalidates the cache and refreshes Fetch interception, which is skipped when the URL patterns did not change.
+- **Side panel structure.** `App.tsx` holds markup and UI-only state. Domain state is in `hooks/`: `useCapture`, `useQaAnalysis`, `useRules`, `useSessions`, `useCollections`, `usePreferences`. Storage access goes through `utils/storage.ts`.
+- **Start-up size.** Dialogs, the request detail, the QA tab and the load tester are loaded on first use (`components/lazy.tsx`). The contract checker with its YAML parser is loaded only when a specification exists.
+- **Content script on demand.** `content.js` is no longer declared in the manifest. `utils/pageMessaging.ts` injects it into the active tab the first time DOM search, highlight or page checks are used.
+- **Masking on export.** `qa/masking.ts` replaces credentials (authorization headers, cookies, tokens, passwords, API keys) with `***` in everything that leaves the browser. It is on by default and can be switched off in the settings. Saved sessions and the cURL/fetch snippets of the request detail are not masked.
+
+## Changes in 2.2.0
+
+### Capture
+
+- **Settings.** `captureSettings` in `chrome.storage.local` is written by the panel and read by the worker (`normalizeCaptureSettings`, `storage.onChanged`). It holds `preserveLog`, `maxRequests` (50–1000), `captureAllResources` and the throttling profile.
+- **Navigation.** Without `preserveLog` the worker clears the tab's lists and posts an empty `TAB_SNAPSHOT`, so the panel and the worker always agree. The pending navigation request (type `document`) stays tracked.
+- **Real headers.** `Network.requestWillBeSentExtraInfo` / `responseReceivedExtraInfo` are kept per request id and merged over the provisional headers when the request finishes (`mergeHeaders`: case-insensitive, pseudo-headers dropped).
+- **Timing.** `response.timing` is turned into phases by `computeTimings` and stored as `ApiRequest.timings`; `protocol`, `remoteAddress`, `transferSize`, `fromCache` come from the same events.
+- **Resource types.** `resourceKind` maps CDP types to `ApiRequest.type`. Only XHR/fetch bodies are downloaded.
+- **Body retention.** Beyond the newest 200 requests bodies are replaced by a marker in the worker and in the panel.
+- **GraphQL.** `utils/graphql.ts` annotates requests in the panel (`ApiRequest.graphql`); the worker does not know about GraphQL.
+
+### Interception
+
+`Fetch.enable` receives one pattern per rule with its stage. `handleRequestPaused` decides by stage:
+
+| Stage | Order of checks |
+|---|---|
+| Request | breakpoint (`stage: request`) → rule `block` → rule `delay` → rule `mock` (sequence, delay, abort) → continue |
+| Response | breakpoint (`stage: response`) → rule `patch` → continue |
+
+- A paused request is described to the panel in full (`BREAKPOINT_REQUEST_PAUSED`: url, method, headers, postData, and for the response stage status, headers, body). The panel keeps a queue and answers with `RESUME_PAUSED_REQUEST` and optional `overrides`.
+- Request overrides go to `Fetch.continueRequest`; the tracked request is updated so the list shows what was sent, with `modified: true`.
+- Response overrides and `patch` rules go to `Fetch.fulfillRequest`; `content-length` / `content-encoding` are dropped. The request is emitted by the Fetch handler and skipped in the Network handler.
+- An unanswered pause is released after 5 minutes.
+- Throttling uses `Network.emulateNetworkConditions`, applied on attach and on every settings change.
+
+### Reports
+
+- **Screenshot.** `CAPTURE_SCREENSHOT` → `Page.captureScreenshot` (optionally the full page, capped at 16384 px), with `tabs.captureVisibleTab` as a fallback.
+- **Jira.** `qa/jira.ts` creates the issue through REST API v2 and attaches the screenshot. Runs in the panel, on a click, after a confirmation.
+- **Step recorder.** `StepRecorder` in `content.js` reports clicks, input, selection and Enter as structured actions with a locator (test id, role and name, label, placeholder or CSS). `useStepRecorder` words them (`stepText`), adds navigations and restarts the recorder after each navigation. `playwrightUiScenario` turns steps into a test. Password values are never read.
+- **HAR import.** `utils/harImport.ts` → `showSnapshot`.
+
+### Checks
+
+- **Contract.** `contractChecker.ts` resolves any local JSON pointer, merges `allOf`, evaluates `oneOf` / `anyOf` / `not` / `discriminator`, and checks pattern, format and the other keywords listed in the README. `bundleExternalRefs` downloads external documents once and inlines them under `x-external`, so validation itself is offline. Paths are matched with `servers` prefixes; concrete paths win over templated ones.
+- **Sessions.** `Session.pinned` exempts a session from the 24-hour / three-session rule in both `retainSessions` implementations.
+- **Accessibility.** axe-core is injected for the run; its findings arrive as `DOMFinding` with `type: "axe"` and replace the built-in checks that axe covers (`CHECKS_COVERED_BY_AXE`).
+- **Streams.** Binary WebSocket frames keep their size and a base64 prefix; the panel renders it with `hexDump`.
+
+### Interface
+
+- **Language.** `locales/en.ts` is typed as `typeof ru`. `main.tsx` reads the language before the first render; changing it re-mounts the panel content (`key={language}`).
+- **Settings transfer.** `utils/settingsTransfer.ts` builds and validates one JSON file with every settings key; captured data and the Jira token are excluded.

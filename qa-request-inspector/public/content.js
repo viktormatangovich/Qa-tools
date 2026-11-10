@@ -1,7 +1,12 @@
-// Content script - DOM field search and highlight system
+// Content script - DOM field search, highlight and page QA checks.
+// Not listed in the manifest: the side panel injects it into a page only when one of these features is used.
 // Network capture is now handled by chrome.debugger CDP in background.js
 
 (function() {
+
+// Injected on demand by the side panel (utils/pageMessaging.ts); a second injection must do nothing.
+if (window.__reqpaneContentScript) return;
+window.__reqpaneContentScript = true;
 
 // ========================================
 // DOM Field Search & Highlight System
@@ -377,8 +382,218 @@ class DOMQAChecker {
 
 const domQAChecker = new DOMQAChecker();
 
+// ========================================
+// Full accessibility audit (axe-core)
+// ========================================
+// axe.min.js is injected by the side panel into the same isolated world right before RUN_AXE_CHECKS.
+
+let axeLocalized = false;
+
+async function runAxeChecks(language) {
+  const axe = globalThis.axe;
+  if (!axe) return { findings: [], error: 'axe-core is not loaded' };
+  // axe-locale-ru.js (injected with the library for the Russian interface) carries the translation.
+  if (language === 'ru' && globalThis.__reqpaneAxeLocaleRu) {
+    axe.configure({ locale: globalThis.__reqpaneAxeLocaleRu });
+    axeLocalized = true;
+  } else if (axeLocalized) {
+    axe.reset();
+    axeLocalized = false;
+  }
+  const results = await axe.run(document, { resultTypes: ['violations'] });
+  const findings = [];
+  for (const violation of results.violations) {
+    for (const node of violation.nodes.slice(0, 20)) {
+      if (findings.length >= 300) break;
+      // Elements inside frames or shadow roots have a multi-part target that querySelector cannot use.
+      const simpleTarget = node.target.length === 1 && typeof node.target[0] === 'string';
+      const html = String(node.html || '').replace(/\svalue="[^"]*"/gi, '').slice(0, 200);
+      findings.push({
+        type: 'axe',
+        selector: simpleTarget ? node.target[0] : '',
+        tagName: (html.match(/^<([a-z0-9-]+)/i) || [])[1] || '',
+        elementDescription: html,
+        pageUrl: location.href,
+        pageTitle: document.title,
+        timestamp: Date.now(),
+        axe: {
+          ruleId: violation.id,
+          impact: node.impact || violation.impact || 'moderate',
+          help: violation.help,
+          helpUrl: violation.helpUrl,
+          summary: String(node.failureSummary || '').slice(0, 400),
+          wcag: violation.tags.filter((tag) => /^wcag\d|^best-practice$/.test(tag)),
+        },
+      });
+    }
+  }
+  return { findings };
+}
+
+// ========================================
+// Step recorder: clicks and input become reproduction steps
+// ========================================
+// Sends structured actions to the side panel; the panel words them and builds the Playwright scenario.
+// Values of password fields are never read.
+
+class StepRecorder {
+  constructor() {
+    this.active = false;
+    this.lastTyped = new WeakMap(); // field -> value already reported
+    this.onClick = this.onClick.bind(this);
+    this.onChange = this.onChange.bind(this);
+    this.onKeyDown = this.onKeyDown.bind(this);
+  }
+
+  start() {
+    if (this.active) return;
+    this.active = true;
+    document.addEventListener('click', this.onClick, true);
+    document.addEventListener('change', this.onChange, true);
+    document.addEventListener('keydown', this.onKeyDown, true);
+  }
+
+  stop() {
+    if (!this.active) return;
+    this.active = false;
+    document.removeEventListener('click', this.onClick, true);
+    document.removeEventListener('change', this.onChange, true);
+    document.removeEventListener('keydown', this.onKeyDown, true);
+  }
+
+  text(value, limit = 60) {
+    return String(value || '').trim().replace(/\s+/g, ' ').slice(0, limit);
+  }
+
+  fieldName(element) {
+    const label = element.labels && element.labels[0] ? this.text(element.labels[0].textContent) : '';
+    return (
+      label ||
+      this.text(element.getAttribute('aria-label')) ||
+      this.text(element.getAttribute('placeholder')) ||
+      this.text(element.getAttribute('name')) ||
+      this.text(element.id)
+    );
+  }
+
+  /** How a test would find the element: test id, role and name, label, placeholder, or a CSS path. */
+  describe(element) {
+    const selector = domSearcher.generateSelector(element);
+    const testIdAttribute = ['data-testid', 'data-test-id', 'data-test', 'data-qa'].find((name) => element.getAttribute(name));
+    const tag = element.tagName.toLowerCase();
+    const isField = tag === 'input' || tag === 'select' || tag === 'textarea';
+    const inputType = tag === 'input' ? (element.getAttribute('type') || 'text').toLowerCase() : '';
+    const isInputButton = ['button', 'submit', 'reset'].includes(inputType);
+    const name = isField && !isInputButton
+      ? this.fieldName(element)
+      : this.text(element.getAttribute('aria-label')) || this.text(isInputButton ? element.value : element.innerText) || this.text(element.getAttribute('title'));
+    const explicitRole = element.getAttribute('role');
+    const role = explicitRole || (tag === 'button' || isInputButton ? 'button' : tag === 'a' && element.hasAttribute('href') ? 'link' : '');
+
+    let locator;
+    if (testIdAttribute) {
+      locator = testIdAttribute === 'data-testid'
+        ? { kind: 'testid', value: element.getAttribute(testIdAttribute) }
+        : { kind: 'css', value: `[${testIdAttribute}="${element.getAttribute(testIdAttribute)}"]` };
+    } else if (role && name) {
+      locator = { kind: 'role', role, value: name };
+    } else if (isField && element.labels && element.labels[0] && name) {
+      locator = { kind: 'label', value: name };
+    } else if (isField && element.getAttribute('placeholder')) {
+      locator = { kind: 'placeholder', value: element.getAttribute('placeholder') };
+    } else {
+      locator = { kind: 'css', value: selector };
+    }
+    return { locator, selector, name, tag, role };
+  }
+
+  send(action) {
+    try {
+      void chrome.runtime.sendMessage({
+        type: 'RECORDED_STEP',
+        action: { ...action, pageUrl: location.href, timestamp: Date.now() },
+      });
+    } catch (e) {
+      // The extension was reloaded: this copy of the script is orphaned.
+      this.stop();
+    }
+  }
+
+  onClick(event) {
+    if (!event.isTrusted || !(event.target instanceof Element)) return;
+    const interactive = event.target.closest(
+      'button, a, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], summary, input[type="button"], input[type="submit"], input[type="reset"], [data-testid], [onclick]',
+    );
+    const element = interactive || event.target;
+    // Typing into a field and toggling a checkbox are reported by "change".
+    if (element.matches('input:not([type="button"]):not([type="submit"]):not([type="reset"]), select, textarea, label, option')) return;
+    if (element === document.body || element === document.documentElement) return;
+    this.send({ kind: 'click', ...this.describe(element) });
+  }
+
+  onChange(event) {
+    const element = event.target;
+    if (!event.isTrusted || !(element instanceof Element)) return;
+    const tag = element.tagName.toLowerCase();
+    if (tag === 'select') {
+      const option = element.selectedOptions && element.selectedOptions[0];
+      this.send({ kind: 'select', value: element.value, optionLabel: option ? this.text(option.textContent) : '', ...this.describe(element) });
+      return;
+    }
+    if (tag === 'textarea') {
+      this.send({ kind: 'fill', value: String(element.value).slice(0, 200), ...this.describe(element) });
+      return;
+    }
+    if (tag !== 'input') return;
+    const type = (element.getAttribute('type') || 'text').toLowerCase();
+    if (type === 'checkbox' || type === 'radio') {
+      this.send({ kind: element.checked ? 'check' : 'uncheck', ...this.describe(element) });
+    } else if (type === 'file') {
+      this.send({ kind: 'upload', value: Array.from(element.files || []).map((file) => file.name).join(', '), ...this.describe(element) });
+    } else {
+      this.reportTyped(element);
+    }
+  }
+
+  /** Reports the text of a field once per value; a password is reported without its value. */
+  reportTyped(element) {
+    const value = String(element.value);
+    if (this.lastTyped.get(element) === value) return;
+    this.lastTyped.set(element, value);
+    const secret = (element.getAttribute('type') || '').toLowerCase() === 'password';
+    this.send({ kind: 'fill', value: secret ? '' : value.slice(0, 200), ...(secret ? { secret: true } : {}), ...this.describe(element) });
+  }
+
+  onKeyDown(event) {
+    if (!event.isTrusted || event.key !== 'Enter' || !(event.target instanceof Element)) return;
+    if (!event.target.matches('input, [contenteditable="true"]')) return;
+    // "change" fires after this keydown: report the typed text first to keep the order of steps.
+    if (event.target.matches('input') && event.target.value) this.reportTyped(event.target);
+    this.send({ kind: 'press', key: 'Enter', ...this.describe(event.target) });
+  }
+}
+
+const stepRecorder = new StepRecorder();
+
 // Handle DOM search messages from side panel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'START_STEP_RECORDING') {
+    stepRecorder.start();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'STOP_STEP_RECORDING') {
+    stepRecorder.stop();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'RUN_AXE_CHECKS') {
+    runAxeChecks(message.language).then(sendResponse, (error) => sendResponse({ findings: [], error: String(error && error.message || error) }));
+    return true;
+  }
+
   if (message.type === 'SEARCH_DOM_FOR_VALUE') {
     const result = domSearcher.searchValue(message.value, message.options);
     sendResponse(result);

@@ -1,5 +1,6 @@
 import { Check, Pin, Star, Tag, Turtle } from 'lucide-react'
 import type { ApiRequest, RequestTag } from '../../types'
+import { t } from '../../locales'
 import { formatBytes, getPayloadSize } from '../../utils'
 
 interface RequestRowProps {
@@ -39,7 +40,9 @@ export function RequestRow({
 }: RequestRowProps) {
   const isError = request.status >= 400 || request.error
   const isSlow = request.duration > 1000
-  const responseSize = getPayloadSize(request.responseBody)
+  // Resources other than API calls are listed without a body: show what came over the network.
+  const responseSize = getPayloadSize(request.responseBody) || request.transferSize || 0
+  const isApiCall = request.type === 'xhr' || request.type === 'fetch'
 
   const getMethodColor = (method: string) => {
     switch (method) {
@@ -90,7 +93,7 @@ export function RequestRow({
           className={`px-2 flex items-center transition-colors ${
             isCompareSelected ? 'text-blue-500' : 'text-text-muted hover:text-blue-400'
           }`}
-          title={isCompareSelected ? 'Remove from comparison' : 'Add to comparison'}
+          title={isCompareSelected ? t().removeFromComparison : t().addToComparison}
         >
           <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
             isCompareSelected ? 'bg-blue-500 border-blue-500' : 'border-current'
@@ -117,10 +120,20 @@ export function RequestRow({
             {isSlow && <Turtle className="w-3 h-3" />}
             {(request.duration / 1000).toFixed(2)}s
           </span>
-          {contractStatus && <span className={`text-[10px] ${contractStatus === 'passed' ? 'text-emerald-600' : contractStatus === 'failed' ? 'text-red-600' : 'text-text-muted'}`}>{contractStatus === 'passed' ? '✓ Контракт' : contractStatus === 'failed' ? '✕ Контракт' : '? Контракт'}</span>}
+          {contractStatus && <span className={`text-[10px] ${contractStatus === 'passed' ? 'text-emerald-600' : contractStatus === 'failed' ? 'text-red-600' : 'text-text-muted'}`}>{contractStatus === 'passed' ? '✓ ' : contractStatus === 'failed' ? '✕ ' : '? '}{t().contractBadge}</span>}
           {responseSize > 0 && (
             <span className="text-[10px] text-text-muted">
               {formatBytes(responseSize)}
+            </span>
+          )}
+          {!isApiCall && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-hover text-text-muted font-medium uppercase">
+              {t().resourceTypeLabels[request.type]}
+            </span>
+          )}
+          {request.modified && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+              {t().modifiedBadge}
             </span>
           )}
           {request.mocked && (
@@ -135,6 +148,11 @@ export function RequestRow({
           )}
         </div>
         <p className="text-xs font-mono text-text truncate">
+          {request.graphql && (
+            <span className="mr-1.5 font-semibold text-pink-600" title={request.graphql.operationType}>
+              {request.graphql.operationType === 'query' ? '' : `${request.graphql.operationType} `}{request.graphql.operationName}
+            </span>
+          )}
           {pathname}
         </p>
         {tags && tags.length > 0 && (
@@ -158,7 +176,7 @@ export function RequestRow({
           className={`px-2 flex items-center transition-colors ${
             isPinned ? 'text-[var(--color-accent)]' : 'text-text-muted hover:text-[var(--color-accent)]'
           }`}
-          title={isPinned ? 'Unpin' : 'Pin'}
+          title={isPinned ? t().unpin : t().pin}
         >
           <Pin className="w-3.5 h-3.5" fill={isPinned ? 'currentColor' : 'none'} />
         </button>
@@ -168,7 +186,7 @@ export function RequestRow({
         className={`px-2 flex items-center transition-colors ${
           isFavorite ? 'text-amber-500' : 'text-text-muted hover:text-amber-400'
         }`}
-        title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+        title={isFavorite ? t().removeFromFavorites : t().addToFavorites}
       >
         <Star className="w-3.5 h-3.5" fill={isFavorite ? 'currentColor' : 'none'} />
       </button>

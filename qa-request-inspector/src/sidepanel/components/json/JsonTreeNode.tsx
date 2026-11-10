@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import type { UsageResult } from '../../types'
 import { getValueType } from '../../utils'
+import { t } from '../../locales'
 
 interface JsonTreeNodeProps {
   keyName: string | number | null
@@ -132,10 +133,10 @@ export function JsonTreeNode({
             }`}
             title={
               usage === undefined
-                ? 'Not scanned'
+                ? t().usageNotScanned
                 : usage.count > 0
-                  ? `Found ${usage.count} time(s) - Click to highlight`
-                  : 'Not found in DOM'
+                  ? t().usageFound(usage.count)
+                  : t().usageNotFound
             }
           >
             {usage === undefined ? '?' : usage.count}

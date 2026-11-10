@@ -1,6 +1,7 @@
 import { Dialog } from '@base-ui-components/react/dialog'
 import { GitCompare, X } from 'lucide-react'
 import type { ApiRequest } from '../../types'
+import { t } from '../../locales'
 
 interface DiffDialogProps {
   open: boolean
@@ -24,7 +25,7 @@ export function DiffDialog({
       }
       return JSON.stringify(data, null, 2)
     } catch {
-      return String(data) || '(empty)'
+      return String(data) || t().diffEmpty
     }
   }
 
@@ -60,15 +61,15 @@ export function DiffDialog({
           <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
               <GitCompare className="w-4 h-4 text-blue-500" />
-              <span className="text-sm font-medium">Compare Responses</span>
+              <span className="text-sm font-medium">{t().diffCompareResponses}</span>
               {!hasDifferences && (
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                  Identical
+                  {t().diffIdentical}
                 </span>
               )}
               {hasDifferences && (
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                  {diffResult.filter(d => d.isDiff).length} differences
+                  {t().diffCount(diffResult.filter(d => d.isDiff).length)}
                 </span>
               )}
             </div>
@@ -88,7 +89,7 @@ export function DiffDialog({
                 <span className="text-[10px] text-text-muted truncate">{(() => { try { return new URL(req1.url).pathname } catch { return req1.url } })()}</span>
               </div>
               <div className="text-[10px] text-text-muted mt-0.5">
-                Status: {req1.status} • {req1.duration}ms
+                {t().diffStatusLine(req1.status, req1.duration)}
               </div>
             </div>
             <div className="flex-1 px-4 py-2 bg-surface">
@@ -97,7 +98,7 @@ export function DiffDialog({
                 <span className="text-[10px] text-text-muted truncate">{(() => { try { return new URL(req2.url).pathname } catch { return req2.url } })()}</span>
               </div>
               <div className="text-[10px] text-text-muted mt-0.5">
-                Status: {req2.status} • {req2.duration}ms
+                {t().diffStatusLine(req2.status, req2.duration)}
               </div>
             </div>
           </div>
@@ -141,17 +142,17 @@ export function DiffDialog({
           <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-surface shrink-0">
             <div className="flex items-center gap-4 text-[10px] text-text-muted">
               <div className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded bg-red-100 border border-red-200" /> Left differs
+                <div className="w-3 h-3 rounded bg-red-100 border border-red-200" /> {t().diffLeft}
               </div>
               <div className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Right differs
+                <div className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> {t().diffRight}
               </div>
             </div>
             <button
               onClick={onClose}
               className="px-3 py-1.5 text-xs bg-accent text-white rounded-lg hover:opacity-90 transition-opacity"
             >
-              Close
+              {t().diffClose}
             </button>
           </div>
         </Dialog.Popup>

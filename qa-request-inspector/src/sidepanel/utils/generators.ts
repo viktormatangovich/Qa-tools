@@ -132,11 +132,12 @@ export function generateHar(requests: ApiRequest[]) {
       version: '1.2',
       creator: {
         name: 'Reqpane',
-        version: '1.0.0',
+        version: typeof chrome !== 'undefined' && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : 'dev',
       },
       entries: requests.map(req => ({
         startedDateTime: new Date(req.timestamp).toISOString(),
         time: req.duration,
+        _resourceType: req.type,
         request: {
           method: req.method,
           url: req.url,
@@ -167,11 +168,22 @@ export function generateHar(requests: ApiRequest[]) {
           bodySize: -1,
         },
         cache: {},
-        timings: {
-          send: 0,
-          wait: req.duration,
-          receive: 0,
-        },
+        // Phases measured by the browser when available; HAR counts TLS inside "connect".
+        timings: req.timings
+          ? {
+              blocked: req.timings.blocked,
+              dns: req.timings.dns,
+              connect: req.timings.connect + req.timings.ssl,
+              ssl: req.timings.ssl,
+              send: req.timings.send,
+              wait: req.timings.wait,
+              receive: req.timings.receive,
+            }
+          : {
+              send: 0,
+              wait: req.duration,
+              receive: 0,
+            },
       })),
     },
   }

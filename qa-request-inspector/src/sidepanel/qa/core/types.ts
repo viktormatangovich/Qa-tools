@@ -31,6 +31,8 @@ export interface QASettings {
   duplicateDetectionEnabled: boolean;
   consoleErrorsEnabled: boolean;
   accessibilityEnabled: boolean;
+  /** Full WCAG audit with axe-core when the page is checked (in addition to the built-in checks). */
+  axeEnabled: boolean;
   securityChecksEnabled: boolean;
   contractValidationEnabled: boolean;
   slowRequestThresholdMs: number;
@@ -46,7 +48,8 @@ export type DOMFindingType =
   | "button-without-accessible-name"
   | "positive-tabindex"
   | "clickable-without-keyboard"
-  | "low-contrast";
+  | "low-contrast"
+  | "axe";
 
 /** Minimal local-DOM evidence returned by the content script. */
 export interface DOMFinding {
@@ -58,6 +61,15 @@ export interface DOMFinding {
   pageUrl: string;
   pageTitle: string;
   timestamp: number;
+  /** Set for findings of the axe-core audit (type "axe"). */
+  axe?: {
+    ruleId: string;
+    impact: "minor" | "moderate" | "serious" | "critical";
+    help: string;
+    helpUrl: string;
+    summary: string;
+    wcag: string[];
+  };
 }
 
 export const defaultQASettings: QASettings = {
@@ -68,6 +80,7 @@ export const defaultQASettings: QASettings = {
   duplicateDetectionEnabled: true,
   consoleErrorsEnabled: true,
   accessibilityEnabled: true,
+  axeEnabled: true,
   securityChecksEnabled: true,
   contractValidationEnabled: true,
   slowRequestThresholdMs: 2000,

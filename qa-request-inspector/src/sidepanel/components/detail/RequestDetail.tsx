@@ -3,12 +3,19 @@ import { Tabs } from '@base-ui-components/react/tabs'
 import { Collapsible } from '@base-ui-components/react/collapsible'
 import { Terminal, X, ChevronDown, Code, Braces, Play, Loader2, Plus, Trash2, Send, Activity, Shield, Bookmark } from 'lucide-react'
 import type { ApiRequest, MockRule, RequestCollection } from '../../types'
-import { TabButton, CodeCopyBlock, JsonTreeView, LoadTestPanel } from '../index'
-import { generateCurl, generateFetchCode, generateTypeScript } from '../../utils'
+import { TabButton } from '../common/TabButton'
+import { CodeCopyBlock } from '../common/CodeCopyBlock'
+import { JsonTreeView } from '../json/JsonTreeView'
+import { TimingBreakdown } from './TimingBreakdown'
+import { lazyComponent } from '../lazy'
+import { generateCurl, generateFetchCode, generateTypeScript } from '../../utils/generators'
 import { useFieldUsage } from '../../hooks/useFieldUsage'
 import { t } from '../../locales'
 import { generateNegativeTests, negativeTestTargets, responseNegativeScenarios, type NegativeScenario } from '../../qa/negativeTesting'
 import type { OpenApiDocument } from '../../qa/contract/types'
+
+// The load tester is a separate tab that is rarely opened.
+const LoadTestPanel = lazyComponent(() => import('../loadtest/LoadTestPanel').then((module) => module.LoadTestPanel))
 
 interface RequestDetailProps {
   request: ApiRequest
@@ -130,7 +137,7 @@ export function RequestDetail({
       responseHeaders: { ...request.responseHeaders },
       enabled: true,
       delay: 0,
-      description: `Мок из запроса ${request.method} ${new URL(request.url).pathname}`,
+      description: t().mockFromRequestDescription(request.method, new URL(request.url).pathname),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
@@ -316,7 +323,7 @@ export function RequestDetail({
                 {onCreateNegativeMock && (
                   <>
                     <hr className="my-1 border-[var(--color-border)]" />
-                    <div className="px-3 py-1 text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">Проверить состояние ошибки</div>
+                    <div className="px-3 py-1 text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">{t().checkErrorState}</div>
                     <div className="grid grid-cols-4 gap-1 px-2 pb-2">
                       {(['401', '403', '404', '409', '429', '500', '502', '503', 'empty', 'malformed-json', 'missing-field', 'null-field', 'delay-1s', 'delay-3s', 'delay-5s', 'timeout'] as NegativeScenario[]).map((scenario) => <button key={scenario} onClick={() => { onCreateNegativeMock(scenario); setShowMockMenu(false); }} className="rounded border border-[var(--color-border)] px-1 py-1 text-[10px] hover:bg-[var(--color-hover)]">{scenario}</button>)}
                     </div>
@@ -421,15 +428,16 @@ export function RequestDetail({
       {/* Tabs */}
       <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <Tabs.List className="flex border-b border-border shrink-0 overflow-x-auto">
-          <TabButton value="response" active={activeTab === 'response'}>Ответ</TabButton>
-          <TabButton value="request" active={activeTab === 'request'}>Запрос</TabButton>
-          <TabButton value="headers" active={activeTab === 'headers'}>Заголовки</TabButton>
-          <TabButton value="edit" active={activeTab === 'edit'}>Правка</TabButton>
-          <TabButton value="negative" active={activeTab === 'negative'}>Негатив</TabButton>
-          <TabButton value="code" active={activeTab === 'code'}>Код</TabButton>
+          <TabButton value="response" active={activeTab === 'response'}>{t().tabResponse}</TabButton>
+          <TabButton value="request" active={activeTab === 'request'}>{t().tabRequest}</TabButton>
+          <TabButton value="headers" active={activeTab === 'headers'}>{t().tabHeaders}</TabButton>
+          <TabButton value="timing" active={activeTab === 'timing'}>{t().timingTab}</TabButton>
+          <TabButton value="edit" active={activeTab === 'edit'}>{t().tabEdit}</TabButton>
+          <TabButton value="negative" active={activeTab === 'negative'}>{t().tabNegative}</TabButton>
+          <TabButton value="code" active={activeTab === 'code'}>{t().tabCode}</TabButton>
           <TabButton value="loadtest" active={activeTab === 'loadtest'}>
             <Activity className="w-3 h-3 mr-1 inline" />
-            Нагр.
+            {t().tabLoad}
           </TabButton>
         </Tabs.List>
 
@@ -447,21 +455,25 @@ export function RequestDetail({
                 onSearchChange={setResponseSearchQuery}
               />
             ) : (
-              <div className="text-xs text-text-muted italic">(пустой ответ)</div>
+              <div className="text-xs text-text-muted italic">{t().emptyResponse}</div>
             )}
           </Tabs.Panel>
 
           <Tabs.Panel value="request" className="p-3 h-full overflow-auto">
             <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-bg p-3 rounded-lg border border-border">
-              {request.requestBody ? formatJson(request.requestBody) : '(пусто)'}
+              {request.requestBody ? formatJson(request.requestBody) : t().emptyValue}
             </pre>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="timing" className="p-3">
+            <TimingBreakdown request={request} />
           </Tabs.Panel>
 
           <Tabs.Panel value="headers" className="p-3">
             <Collapsible.Root defaultOpen>
               <Collapsible.Trigger className="flex items-center gap-1 text-xs font-medium mb-2">
                 <ChevronDown className="w-3 h-3" />
-                Заголовки запроса
+                {t().requestHeaders}
               </Collapsible.Trigger>
               <Collapsible.Panel>
                 <div className="space-y-1 mb-4">
@@ -472,7 +484,7 @@ export function RequestDetail({
                     </div>
                   ))}
                   {Object.keys(request.requestHeaders).length === 0 && (
-                    <p className="text-xs text-text-muted">(нет)</p>
+                    <p className="text-xs text-text-muted">{t().none}</p>
                   )}
                 </div>
               </Collapsible.Panel>
@@ -481,7 +493,7 @@ export function RequestDetail({
             <Collapsible.Root defaultOpen>
               <Collapsible.Trigger className="flex items-center gap-1 text-xs font-medium mb-2">
                 <ChevronDown className="w-3 h-3" />
-                Заголовки ответа
+                {t().responseHeaders}
               </Collapsible.Trigger>
               <Collapsible.Panel>
                 <div className="space-y-1">
@@ -492,7 +504,7 @@ export function RequestDetail({
                     </div>
                   ))}
                   {Object.keys(request.responseHeaders).length === 0 && (
-                    <p className="text-xs text-text-muted">(нет)</p>
+                    <p className="text-xs text-text-muted">{t().none}</p>
                   )}
                 </div>
               </Collapsible.Panel>
@@ -610,12 +622,12 @@ export function RequestDetail({
               <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <h3 className="text-xs font-semibold">Boundary &amp; Negative API Tester</h3>
-                    <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Подготовьте вариант и откройте его в «Правке»; отправка остаётся ручной.</p>
+                    <h3 className="text-xs font-semibold">{t().negativeTesterTitle}</h3>
+                    <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">{t().negativeTesterHint}</p>
                   </div>
                   {contractDocument && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">OpenAPI</span>}
                 </div>
-                <label className="mt-3 block text-[10px] text-[var(--color-text-muted)]">Поле или параметр
+                <label className="mt-3 block text-[10px] text-[var(--color-text-muted)]">{t().negativeTarget}
                   <select value={negativeTargetId} onChange={(event) => setNegativeTargetId(event.target.value)} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
                     {negativeTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
                   </select>
@@ -624,12 +636,12 @@ export function RequestDetail({
               <div className="space-y-1">
                 {negativeTests.map((test) => <article key={test.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] p-2">
                   <div className="min-w-0 flex-1"><div className="text-xs font-medium">{test.title}</div><p className="text-[10px] text-[var(--color-text-muted)]">{test.description}</p></div>
-                  <button type="button" onClick={() => applyNegativeTest(test)} className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-accent hover:bg-[var(--color-hover)]">В правку</button>
+                  <button type="button" onClick={() => applyNegativeTest(test)} className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-accent hover:bg-[var(--color-hover)]">{t().negativeToEdit}</button>
                 </article>)}
               </div>
               <div className="rounded-lg border border-[var(--color-border)] p-3">
-                <h3 className="text-xs font-semibold">Сценарии ответа (мок)</h3>
-                <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Создадут локальное правило мока для этого URL.</p>
+                <h3 className="text-xs font-semibold">{t().negativeMockScenarios}</h3>
+                <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">{t().negativeMockScenariosHint}</p>
                 <div className="mt-2 flex flex-wrap gap-1">{responseNegativeScenarios.map((scenario) => <button key={scenario} type="button" disabled={!onCreateNegativeMock} onClick={() => onCreateNegativeMock?.(scenario)} className="rounded border border-[var(--color-border)] px-2 py-1 text-[10px] hover:bg-[var(--color-hover)] disabled:opacity-40">{scenario}</button>)}</div>
               </div>
             </div>
