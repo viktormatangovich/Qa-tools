@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Tabs } from '@base-ui-components/react/tabs'
 import { Collapsible } from '@base-ui-components/react/collapsible'
 import { Terminal, X, ChevronDown, Code, Braces, Play, Loader2, Plus, Trash2, Send, Activity, Shield, Bookmark } from 'lucide-react'
 import type { ApiRequest, MockRule, RequestCollection } from '../../types'
 import { TabButton } from '../common/TabButton'
 import { CodeCopyBlock } from '../common/CodeCopyBlock'
+import { BodyEditor } from '../common/BodyEditor'
+import { contentTypeOf, requestBodyTree } from '../../utils/formBody'
 import { JsonTreeView } from '../json/JsonTreeView'
 import { TimingBreakdown } from './TimingBreakdown'
 import { lazyComponent } from '../lazy'
@@ -50,6 +52,13 @@ export function RequestDetail({
   const [showMockMenu, setShowMockMenu] = useState(false)
   const [showCollectionMenu, setShowCollectionMenu] = useState(false)
   const [responseSearchQuery, setResponseSearchQuery] = useState('')
+  const [requestSearchQuery, setRequestSearchQuery] = useState('')
+  const [requestBodyRaw, setRequestBodyRaw] = useState(false)
+  // JSON or a decoded form body is shown as a tree with the same search as the response
+  const requestTree = useMemo(
+    () => requestBodyTree(request.requestBody, contentTypeOf(request.requestHeaders)),
+    [request.requestBody, request.requestHeaders],
+  )
   const mockMenuRef = useRef<HTMLDivElement>(null)
   const collectionMenuRef = useRef<HTMLDivElement>(null)
 
@@ -278,7 +287,7 @@ export function RequestDetail({
                           setShowCollectionMenu(false)
                         }}
                         disabled={alreadyIn}
-                        className={`w-full px-3 py-2 text-xs text-left flex items-center gap-2 ${
+                        className={`min-w-0 w-full px-3 py-2 text-xs text-left flex items-center gap-2 ${
                           alreadyIn
                             ? 'text-[var(--color-text-muted)] opacity-50 cursor-not-allowed'
                             : 'hover:bg-[var(--color-hover)]'
@@ -346,7 +355,7 @@ export function RequestDetail({
                           onCreateMock?.(rule)
                           setShowMockMenu(false)
                         }}
-                        className="w-full px-3 py-2 text-xs text-left hover:bg-[var(--color-hover)] flex items-center gap-2"
+                        className="min-w-0 w-full px-3 py-2 text-xs text-left hover:bg-[var(--color-hover)] flex items-center gap-2"
                       >
                         <span className={`text-[10px] font-mono font-semibold ${
                           rule.method === 'GET' ? 'text-emerald-600' :
@@ -427,7 +436,7 @@ export function RequestDetail({
 
       {/* Tabs */}
       <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <Tabs.List className="flex border-b border-border shrink-0 overflow-x-auto">
+        <Tabs.List className="@container flex border-b border-border shrink-0 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]">
           <TabButton value="response" active={activeTab === 'response'}>{t().tabResponse}</TabButton>
           <TabButton value="request" active={activeTab === 'request'}>{t().tabRequest}</TabButton>
           <TabButton value="headers" active={activeTab === 'headers'}>{t().tabHeaders}</TabButton>
@@ -460,9 +469,30 @@ export function RequestDetail({
           </Tabs.Panel>
 
           <Tabs.Panel value="request" className="p-3 h-full overflow-auto">
-            <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-bg p-3 rounded-lg border border-border">
-              {request.requestBody ? formatJson(request.requestBody) : t().emptyValue}
-            </pre>
+            {requestTree && (
+              <div className="mb-2 flex items-center gap-1" role="group" aria-label={t().bodyViewLabel}>
+                <button type="button" onClick={() => setRequestBodyRaw(false)} aria-pressed={!requestBodyRaw}
+                  className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${!requestBodyRaw ? 'bg-accent text-white' : 'text-text-muted hover:bg-hover'}`}>
+                  {requestTree.kind === 'form' ? t().bodyViewFormTree : t().bodyViewTree}
+                </button>
+                <button type="button" onClick={() => setRequestBodyRaw(true)} aria-pressed={requestBodyRaw}
+                  className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${requestBodyRaw ? 'bg-accent text-white' : 'text-text-muted hover:bg-hover'}`}>
+                  {t().bodyViewRaw}
+                </button>
+              </div>
+            )}
+            {requestTree && !requestBodyRaw ? (
+              <JsonTreeView
+                data={requestTree.data}
+                searchQuery={requestSearchQuery}
+                onSearchChange={setRequestSearchQuery}
+                searchPlaceholder={t().searchInRequestBody}
+              />
+            ) : (
+              <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-bg p-3 rounded-lg border border-border">
+                {request.requestBody ? formatJson(request.requestBody) : t().emptyValue}
+              </pre>
+            )}
           </Tabs.Panel>
 
           <Tabs.Panel value="timing" className="p-3">
@@ -578,10 +608,11 @@ export function RequestDetail({
               {editMethod !== 'GET' && (
                 <div>
                   <span className="text-xs font-medium mb-2 block">{t().requestBody}</span>
-                  <textarea
+                  <BodyEditor
                     value={editBody}
-                    onChange={(e) => setEditBody(e.target.value)}
-                    className="w-full h-24 px-2 py-1.5 text-xs font-mono rounded-lg border border-border bg-surface focus:outline-none focus:border-accent resize-none"
+                    onChange={setEditBody}
+                    contentType={editHeaders.find(h => h.key.toLowerCase() === 'content-type')?.value ?? contentTypeOf(request.requestHeaders)}
+                    className="w-full h-24 px-2 py-1.5 text-xs font-mono rounded-lg border border-border bg-surface focus:outline-none focus:border-accent resize-y"
                     placeholder={t().requestBody + " (JSON)"}
                   />
                 </div>

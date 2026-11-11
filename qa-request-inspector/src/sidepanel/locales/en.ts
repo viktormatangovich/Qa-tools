@@ -44,8 +44,8 @@ export const en: typeof ru = {
 
   // Placeholders
   filterByUrl: "Filter by URL...",
-  searchInBody: "Search in body...",
-  searchInResponse: "Search in response...",
+  searchInBody: "Search bodies: fields and values...",
+  searchInResponse: "Search response fields and values...",
 
   // View modes
   listView: "List",
@@ -395,6 +395,13 @@ export const en: typeof ru = {
   pausedHeaders: "Headers (one per line — Name: value)",
   pausedInvalidHeaders: "Every header line needs a name and a colon.",
   pausedBody: "Body",
+  bodyViewLabel: "Request body view",
+  bodyViewRaw: "Raw",
+  bodyViewTree: "Tree",
+  bodyViewFormTree: "Form fields (decoded)",
+  searchInRequestBody: "Search body fields and values...",
+  bodyViewForm: "Decode",
+  bodyViewFormHint: "One line per field, name=value. A line break inside a value is \\n, a backslash is \\\\. The body is encoded back when sent.",
   pausedBinary: "The response body is binary: it cannot be edited, only continued or cancelled.",
   pausedHint: "Without an answer the request continues unchanged after 5 minutes. Closing this sheet also continues it.",
   pausedSendEdited: "Send with changes",

@@ -604,7 +604,7 @@ export default function App() {
         </div>
 
         {/* Filter tabs */}
-        <div className="flex flex-wrap gap-1 p-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+        <div className="@container flex flex-wrap gap-1 p-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
           <FilterButton
             active={filter === 'all'}
             onClick={() => setFilter('all')}

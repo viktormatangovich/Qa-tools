@@ -236,9 +236,11 @@ export function MockRuleEditor({
           </div>
         )}
 
-        {/* Method + Status + Delay */}
-        <div className="flex gap-3">
-          <div className="flex-1">
+        {/* Method + Status + Delay: equal columns at least 6.5rem wide; on a
+            narrow panel the fields move to the next row instead of squeezing
+            the method select. Hidden fields are not grid items. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] items-start gap-3">
+          <div>
             <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().mockMethod}</label>
             <select
               value={method}
@@ -253,7 +255,7 @@ export function MockRuleEditor({
               <option value="DELETE">DELETE</option>
             </select>
           </div>
-          <div className={mode === 'mock' ? 'w-24' : 'hidden'}>
+          <div className={mode === 'mock' ? '' : 'hidden'}>
             <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().mockStatusCode}</label>
             <input
               type="number"
@@ -262,7 +264,7 @@ export function MockRuleEditor({
               className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] focus:outline-none focus:border-purple-500"
             />
           </div>
-          <div className={mode === 'mock' ? 'w-28' : 'hidden'}>
+          <div className={mode === 'mock' ? '' : 'hidden'}>
             <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().mockStatusText}</label>
             <input
               type="text"
@@ -271,7 +273,7 @@ export function MockRuleEditor({
               className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] focus:outline-none focus:border-purple-500"
             />
           </div>
-          <div className={mode === 'block' ? 'hidden' : 'w-24'}>
+          <div className={mode === 'block' ? 'hidden' : ''}>
             <label className="text-xs font-medium mb-1 block text-[var(--color-text)]">{t().mockDelay}</label>
             <input
               type="number"

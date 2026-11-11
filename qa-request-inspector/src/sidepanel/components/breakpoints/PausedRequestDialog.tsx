@@ -3,6 +3,8 @@ import { Pause } from 'lucide-react'
 import type { PausedOverrides } from '../../hooks/useCapture'
 import { t } from '../../locales'
 import type { PausedRequest } from '../../types'
+import { contentTypeOf } from '../../utils/formBody'
+import { BodyEditor } from '../common/BodyEditor'
 
 interface PausedRequestDialogProps {
   paused: PausedRequest
@@ -114,9 +116,15 @@ export function PausedRequestDialog({ paused, queued, onResume }: PausedRequestD
         {binary ? (
           <p className="text-xs text-text-muted">{t().pausedBinary}</p>
         ) : (
-          <label className="block text-xs font-medium">{t().pausedBody}
-            <textarea value={body} onChange={(event) => setBody(event.target.value)} spellCheck={false} className={`${field} mt-1 h-40 resize-y`} />
-          </label>
+          <div className="text-xs font-medium">
+            <span className="mb-1 block">{t().pausedBody}</span>
+            <BodyEditor
+              value={body}
+              onChange={setBody}
+              contentType={contentTypeOf(parsedHeaders ?? undefined)}
+              className={`${field} h-40 resize-y`}
+            />
+          </div>
         )}
         <p className="text-[10px] text-text-muted">{t().pausedHint}</p>
       </div>

@@ -264,6 +264,40 @@ test('a mock saved to storage is applied and reported once', async () => {
   assert.deepEqual(requests[0].responseBody, { error: 'down' });
 });
 
+test('a mock made from a captured request drops encoding headers and splits multi-line values', async () => {
+  const shared = createShared();
+  const chrome = await startWorker(shared);
+  await openPanel(chrome, 1);
+
+  await send(chrome, {
+    type: 'SAVE_MOCK_RULES',
+    payload: [{
+      id: 'm1', enabled: true, method: 'ALL', urlPattern: '/api/summary', status: 200, responseBody: '{"ок":1}',
+      responseHeaders: {
+        'content-type': 'application/json; charset=utf-8',
+        'content-encoding': 'br',
+        'Content-Length': '12345',
+        'transfer-encoding': 'chunked',
+        'set-cookie': 'a=1\nb=2',
+      },
+    }],
+  });
+  chrome.debugger.onEvent.fire({ tabId: 11 }, 'Fetch.requestPaused', {
+    requestId: 'f1', resourceType: 'Fetch',
+    request: { url: 'https://one.test/api/summary?tsf=1', method: 'GET', headers: {} },
+  });
+  await tick();
+
+  const fulfil = chrome.commands.find((command) => command.method === 'Fetch.fulfillRequest');
+  assert.ok(fulfil, 'the mock is fulfilled, not passed to the server');
+  assert.deepEqual(fulfil.params.responseHeaders, [
+    { name: 'content-type', value: 'application/json; charset=utf-8' },
+    { name: 'set-cookie', value: 'a=1' },
+    { name: 'set-cookie', value: 'b=2' },
+  ]);
+  assert.equal(Buffer.from(fulfil.params.body, 'base64').toString('utf8'), '{"ок":1}');
+});
+
 test('a breakpoint pauses the request and resume continues it', async () => {
   const shared = createShared();
   shared.local.breakpointRules = [{ id: 'b1', enabled: true, method: 'POST', urlPattern: '/pay' }];

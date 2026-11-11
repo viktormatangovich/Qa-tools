@@ -2,6 +2,7 @@ import { ChevronRight } from 'lucide-react'
 import type { UsageResult } from '../../types'
 import { getValueType } from '../../utils'
 import { t } from '../../locales'
+import { nodeMatch } from '../../utils/jsonSearch'
 
 interface JsonTreeNodeProps {
   keyName: string | number | null
@@ -11,7 +12,7 @@ interface JsonTreeNodeProps {
   expandedPaths: Set<string>
   toggleExpanded: (path: string) => void
   usageCache?: Map<string, UsageResult>
-  onHighlight: (path: string, value: unknown) => void
+  onHighlight?: (path: string, value: unknown) => void
   searchQuery?: string
 }
 
@@ -34,10 +35,10 @@ export function JsonTreeNode({
   const childEntries = isExpandable ? Object.entries(value as object) : []
   const childCount = childEntries.length
 
-  // Check if this node matches the search query (exact match on value)
+  // A node matches by its field name or by its value (same rule as searchJson, which counts matches)
   const q = searchQuery.trim()
-  const valueStr = !isExpandable ? String(formatValue()) : ''
-  const isMatch = q && valueStr.toLowerCase().includes(q.toLowerCase())
+  const match = nodeMatch(keyName, value, q.toLowerCase())
+  const isMatch = match.key || match.value
 
   // Get syntax highlighting color for value
   const getValueColor = () => {
@@ -67,18 +68,16 @@ export function JsonTreeNode({
     return String(value)
   }
 
-  // Highlight matching text in value
-  const highlightValue = () => {
-    const formatted = formatValue()
-    if (!q || !isMatch) return formatted
-    const lower = formatted.toLowerCase()
-    const idx = lower.indexOf(q.toLowerCase())
-    if (idx === -1) return formatted
+  // Highlight the matching part of a shown text (a long value may be cut before the match)
+  const highlight = (text: string, matched: boolean) => {
+    if (!matched) return text
+    const idx = text.toLowerCase().indexOf(q.toLowerCase())
+    if (idx === -1) return text
     return (
       <>
-        {formatted.slice(0, idx)}
-        <mark className="bg-yellow-200 dark:bg-yellow-700 rounded px-0.5">{formatted.slice(idx, idx + q.length)}</mark>
-        {formatted.slice(idx + q.length)}
+        {text.slice(0, idx)}
+        <mark className="bg-yellow-200 dark:bg-yellow-700 rounded px-0.5">{text.slice(idx, idx + q.length)}</mark>
+        {text.slice(idx + q.length)}
       </>
     )
   }
@@ -106,7 +105,7 @@ export function JsonTreeNode({
         {keyName !== null && (
           <>
             <span className="text-accent">
-              {typeof keyName === 'string' ? `"${keyName}"` : `[${keyName}]`}
+              {typeof keyName === 'string' ? <>"{highlight(keyName, match.key)}"</> : `[${keyName}]`}
             </span>
             <span className="text-text-muted">:</span>
           </>
@@ -114,7 +113,7 @@ export function JsonTreeNode({
 
         {/* Value */}
         <span className={getValueColor()}>
-          {highlightValue()}
+          {highlight(String(formatValue()), match.value)}
         </span>
 
         {/* Usage indicator */}
@@ -122,7 +121,7 @@ export function JsonTreeNode({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              onHighlight(path, value)
+              onHighlight?.(path, value)
             }}
             className={`ml-auto px-1.5 py-0.5 text-[10px] rounded transition-colors ${
               usage === undefined

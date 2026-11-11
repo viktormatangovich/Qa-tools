@@ -3,14 +3,18 @@ import { Loader2, Eye, Search, X } from 'lucide-react'
 import type { UsageResult, ScanStatus } from '../../types'
 import { JsonTreeNode } from './JsonTreeNode'
 import { t } from '../../locales'
+import { searchJson } from '../../utils/jsonSearch'
 
 interface JsonTreeViewProps {
   data: unknown
   usageCache?: Map<string, UsageResult>
-  onHighlight: (path: string, value: unknown) => void
-  onScan: () => void
-  scanStatus: ScanStatus
-  progress: { scanned: number; total: number }
+  // Field usage on the page (response only): without onScan the scan controls are not shown.
+  onHighlight?: (path: string, value: unknown) => void
+  onScan?: () => void
+  scanStatus?: ScanStatus
+  progress?: { scanned: number; total: number }
+  /** Placeholder of the search field. */
+  searchPlaceholder?: string
   searchQuery?: string
   onSearchChange?: (query: string) => void
 }
@@ -21,7 +25,8 @@ export function JsonTreeView({
   onHighlight,
   onScan,
   scanStatus,
-  progress,
+  progress = { scanned: 0, total: 0 },
+  searchPlaceholder,
   searchQuery = '',
   onSearchChange,
 }: JsonTreeViewProps) {
@@ -57,23 +62,23 @@ export function JsonTreeView({
     setExpandedPaths(new Set(['root']))
   }, [])
 
-  const matchCount = useMemo(() => {
-    if (!searchQuery.trim()) return 0
-    const q = searchQuery.toLowerCase()
-    let count = 0
-    const traverse = (obj: unknown) => {
-      if (obj && typeof obj === 'object') {
-        Object.entries(obj as object).forEach(([, value]) => {
-          if (String(value).toLowerCase().includes(q)) {
-            count++
-          }
-          traverse(value)
-        })
-      }
+  const search = useMemo(() => searchJson(data, searchQuery), [data, searchQuery])
+  const matchCount = search.paths.length
+
+  // A match inside a collapsed object is not rendered, so it could be neither seen nor reached
+  // with Enter: open its parents whenever the query or the response changes. Done during render
+  // (not in an effect) so that the scroll effect below already finds the opened nodes.
+  const [expandedFor, setExpandedFor] = useState(search)
+  if (expandedFor !== search) {
+    setExpandedFor(search)
+    if (search.ancestors.size > 0) {
+      setExpandedPaths(prev => {
+        const next = new Set(prev)
+        search.ancestors.forEach(path => next.add(path))
+        return next
+      })
     }
-    traverse(data)
-    return count
-  }, [data, searchQuery])
+  }
 
   const treeRef = useRef<HTMLDivElement>(null)
   const [focusedMatchIndex, setFocusedMatchIndex] = useState(0)
@@ -128,7 +133,7 @@ export function JsonTreeView({
           value={searchQuery}
           onChange={(e) => onSearchChange?.(e.target.value)}
           onKeyDown={handleSearchKeyDown}
-          placeholder={t().searchInResponse}
+          placeholder={searchPlaceholder ?? t().searchInResponse}
           className="w-full pl-8 pr-8 py-1.5 text-xs rounded-lg bg-surface border border-border placeholder:text-text-muted focus:outline-none focus:border-accent"
         />
         {searchQuery && (
@@ -148,6 +153,7 @@ export function JsonTreeView({
 
       {/* Controls */}
       <div className="flex items-center gap-2 flex-wrap">
+        {onScan && (
         <button
           onClick={onScan}
           disabled={scanStatus === 'scanning'}
@@ -171,6 +177,7 @@ export function JsonTreeView({
             </>
           )}
         </button>
+        )}
 
         {scanStatus === 'complete' && usageCache && (
           <span className="text-[10px] text-text-muted">

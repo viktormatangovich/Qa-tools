@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { contentTypeOf, decodeFormBody, encodeFormBody, formBodyToObject, isFormEncoded, requestBodyTree } from "./formBody.ts";
 import { graphqlInfo, withGraphql } from "./graphql.ts";
+import { nodeMatch, searchJson } from "./jsonSearch.ts";
 import { parseHar } from "./harImport.ts";
+import { filterRequests } from "./requestList.ts";
+import type { ApiRequest } from "../types.ts";
 import { hexDump } from "./hex.ts";
 import { buildSettingsFile, readSettingsFile } from "./settingsTransfer.ts";
 
@@ -135,4 +139,93 @@ test("an imported file is validated; the stored Jira token is kept", () => {
   assert.throws(() => readSettingsFile("[]"), /not-settings/);
   assert.throws(() => readSettingsFile("{"), /not-json/);
   assert.throws(() => readSettingsFile('{"app":"other","kind":"settings","settings":{}}'), /not-settings/);
+});
+
+// ---- Form-encoded bodies ------------------------------------------------------------------------
+
+test("a form-encoded body is decoded to name=value lines and encoded back", () => {
+  const body = "name=1&prompt=%D0%BF%D1%80%D0%BE%D0%BC%D0%BF%D1%82";
+  assert.equal(decodeFormBody(body), "name=1\nprompt=промпт");
+  assert.equal(encodeFormBody(decodeFormBody(body)), body);
+  assert.equal(
+    encodeFormBody("name=1\nprompt=новый промпт & ещё=да"),
+    "name=1&prompt=%D0%BD%D0%BE%D0%B2%D1%8B%D0%B9%20%D0%BF%D1%80%D0%BE%D0%BC%D0%BF%D1%82%20%26%20%D0%B5%D1%89%D1%91%3D%D0%B4%D0%B0",
+  );
+});
+
+test("form decoding keeps line breaks, plus signs, flags and broken escapes", () => {
+  // In the decoded text a line break inside a value is \n and a backslash is \.
+  assert.equal(decodeFormBody("q=a+b&text=line1%0Aline2%5Cn&flag&bad=100%"), "q=a b\ntext=line1\\nline2\\\\n\nflag\nbad=100%");
+  assert.equal(encodeFormBody("q=a b\ntext=line1\\nline2\\\\n\nflag", true), "q=a+b&text=line1%0Aline2%5Cn&flag");
+  assert.equal(encodeFormBody("a=1\r\n\n  \nb=2"), "a=1&b=2");
+});
+
+test("a body is offered for decoding only when it looks like a form", () => {
+  assert.equal(isFormEncoded("name=1&prompt=%D0%BF"), true);
+  assert.equal(isFormEncoded("token=abc=="), true);
+  assert.equal(isFormEncoded('{"a":"b=c"}'), false);
+  assert.equal(isFormEncoded("just text"), false);
+  assert.equal(isFormEncoded("a=1 & b=2"), false);
+  assert.equal(isFormEncoded("", "application/x-www-form-urlencoded; charset=UTF-8"), true);
+  assert.equal(contentTypeOf({ "Content-Type": "application/x-www-form-urlencoded" }), "application/x-www-form-urlencoded");
+});
+
+test("a request body becomes a tree: JSON as is, a form decoded, anything else stays text", () => {
+  const form = formBodyToObject("name=1&prompt=%D0%BF%D1%80%D0%BE%D0%BC%D0%BF%D1%82&id=1&id=2&flag&__proto__=x");
+  assert.deepEqual({ ...form }, { name: "1", prompt: "промпт", id: ["1", "2"], flag: "", ["__proto__"]: "x" });
+  assert.equal(Object.getPrototypeOf(form), null);
+
+  assert.deepEqual(requestBodyTree('{"a":{"b":1}}'), { kind: "json", data: { a: { b: 1 } } });
+  assert.deepEqual(requestBodyTree({ a: 1 }), { kind: "json", data: { a: 1 } });
+  assert.equal(requestBodyTree('{"a":'), null);
+  assert.equal(requestBodyTree('"just a string"'), null);
+  assert.equal(requestBodyTree("plain text"), null);
+  assert.equal(requestBodyTree(null), null);
+  assert.equal(requestBodyTree("a=1&b=%D0%B1")?.kind, "form");
+  assert.deepEqual(requestBodyTree("q=a+b", "application/x-www-form-urlencoded")?.data, Object.assign(Object.create(null), { q: "a b" }));
+});
+
+test("the body search of the request list finds field names and decoded values", () => {
+  const request = (id: string, requestBody: unknown, responseBody: unknown, requestHeaders: Record<string, string> = {}) =>
+    ({ id, url: `https://api.test/${id}`, method: "POST", status: 200, duration: 10, requestBody, responseBody, requestHeaders, responseHeaders: {} }) as unknown as ApiRequest;
+  const requests = [
+    request("form", "name=1&prompt=%D0%BF%D1%80%D0%BE%D0%BC%D0%BF%D1%82", null),
+    request("json", '{"filter":{"dateFrom":"2026-11-01"}}', { items: [{ totalCount: 5 }] }),
+    request("escaped", null, '{"title":"\\u041e\\u0442\\u0447\\u0451\\u0442"}'),
+    request("object", { userId: 7 }, null),
+  ];
+  const ids = (query: string) => filterRequests(requests, { filter: "all", urlFilter: "", bodySearch: query }).map((r) => r.id);
+
+  assert.deepEqual(ids("промпт"), ["form"], "a form value is decoded");
+  assert.deepEqual(ids("prompt"), ["form"], "a form field name");
+  assert.deepEqual(ids("DATEFROM"), ["json"], "a request field name, any case");
+  assert.deepEqual(ids("totalcount"), ["json"], "a response field name");
+  assert.deepEqual(ids("отчёт"), ["escaped"], "\\u-escaped text is found as Cyrillic");
+  assert.deepEqual(ids("userid"), ["object"], "a body kept as an object, not [object Object]");
+  assert.deepEqual(ids('"totalcount":5'), ["json"], "a fragment of the raw text still matches");
+  assert.deepEqual(ids("object"), [], "nothing matches [object Object]");
+});
+
+// ---- Search in a JSON response ------------------------------------------------------------------
+
+test("response search finds field names as well as values and opens their parents", () => {
+  const data = {
+    userId: 7,
+    items: [{ title: "Отчёт", Price: 10 }, { title: "user guide", price: null }],
+    meta: { long: "x".repeat(100) + "needle" },
+  };
+  const found = searchJson(data, "  USER ");
+  // The field name "userId" and the value "user guide", in tree order.
+  assert.deepEqual(found.paths, ["root.userId", "root.items.1.title"]);
+  assert.deepEqual([...found.ancestors].sort(), ["root", "root.items", "root.items.1"]);
+
+  assert.deepEqual(searchJson(data, "price").paths, ["root.items.0.Price", "root.items.1.price"]);
+  assert.deepEqual(searchJson(data, "null").paths, ["root.items.1.price"]);
+  // A long value is searched in full, not in the shortened text the tree shows.
+  assert.deepEqual(searchJson(data, "needle").paths, ["root.meta.long"]);
+  // Objects are not searched as "[object Object]", array indices are not field names.
+  assert.deepEqual(searchJson(data, "object").paths, []);
+  assert.deepEqual(searchJson(data, "1").paths, ["root.items.0.Price"]);
+  assert.deepEqual(searchJson(data, "   ").paths, []);
+  assert.deepEqual(nodeMatch("items", [], "item"), { key: true, value: false });
 });

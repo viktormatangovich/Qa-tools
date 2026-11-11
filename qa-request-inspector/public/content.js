@@ -509,10 +509,12 @@ class StepRecorder {
 
   send(action) {
     try {
-      void chrome.runtime.sendMessage({
+      // Rejects with "Receiving end does not exist" when no panel listens (closed meanwhile);
+      // left unhandled, it lands in the page console and in the panel's own error list.
+      chrome.runtime.sendMessage({
         type: 'RECORDED_STEP',
         action: { ...action, pageUrl: location.href, timestamp: Date.now() },
-      });
+      }).catch(() => {});
     } catch (e) {
       // The extension was reloaded: this copy of the script is orphaned.
       this.stop();

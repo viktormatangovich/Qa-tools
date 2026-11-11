@@ -43,7 +43,7 @@ export function ConsoleErrorRow({
   return (
     <button
       onClick={onClick}
-      className={`w-full px-4 py-3 text-left transition-colors ${
+      className={`min-w-0 w-full px-4 py-3 text-left transition-colors ${
         isSelected ? 'bg-accent-light' : 'hover:bg-hover'
       }`}
     >

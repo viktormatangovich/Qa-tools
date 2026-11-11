@@ -86,7 +86,15 @@ html.dark {
   overflow: auto;
 }
 
-:where(.app-shell, .panel-dialog, .diff-dialog) :where(.flex, .grid) > * {
+/* Buttons and tabs are left out of the two rules above/below: with them a
+   squeezed button shrank to one letter per line ("Медлен/ные"). They keep the
+   default flex min-width (their longest word); a button with `truncate`
+   (overflow: hidden) still shrinks, because then the default is 0. */
+:where(.app-shell, .panel-dialog, .diff-dialog) :where(button, [role="tab"]) {
+  overflow-wrap: normal;
+}
+
+:where(.app-shell, .panel-dialog, .diff-dialog) :where(.flex, .grid) > :not(button, [role="tab"]) {
   min-width: 0;
 }
 

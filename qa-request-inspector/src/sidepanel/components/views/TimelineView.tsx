@@ -68,7 +68,7 @@ export function TimelineView({
           <button
             key={req.id}
             onClick={() => onSelect(req)}
-            className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
+            className={`min-w-0 w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
               selectedRequest?.id === req.id ? 'bg-accent-light' : 'hover:bg-hover'
             }`}
           >

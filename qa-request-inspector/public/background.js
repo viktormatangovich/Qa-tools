@@ -1090,12 +1090,16 @@ async function handleRequestPaused(tabId, state, params) {
     return;
   }
 
-  // Build response headers
-  const headers = [];
+  // Build response headers.
+  // A mock made from a captured request carries its real headers. Content-Encoding/Content-Length
+  // describe the server's compressed body, not this one (the browser would fail to decode it), and
+  // CDP rejects a value with line breaks (several Set-Cookie are joined with "\n"): one entry per line.
   const mockHeaders = matchedMock.responseHeaders || {};
-  for (const [name, value] of Object.entries(mockHeaders)) {
-    headers.push({ name, value });
-  }
+  const headers = headersForNewBody(
+    Object.entries(mockHeaders).flatMap(([name, value]) =>
+      String(value ?? "").split("\n").map((line) => ({ name, value: line })),
+    ),
+  );
   if (!headers.some((h) => h.name.toLowerCase() === "content-type")) {
     headers.push({ name: "content-type", value: "application/json" });
   }
@@ -1105,11 +1109,10 @@ async function handleRequestPaused(tabId, state, params) {
       requestId: params.requestId,
       responseCode: matchedMock.status || 200,
       responseHeaders: headers,
-      body: btoa(
-        unescape(encodeURIComponent(matchedMock.responseBody || "{}")),
-      ),
+      body: encodeBase64(matchedMock.responseBody || "{}"),
     });
   } catch (e) {
+    console.error("[Reqpane] Mock was not applied, the request goes to the server:", e);
     // Fallback: continue the request normally (it is then reported by the Network domain)
     if (params.networkId) mockedNetworkIds.delete(scoped(tabId, params.networkId));
     await continueRequest(tabId, params.requestId);

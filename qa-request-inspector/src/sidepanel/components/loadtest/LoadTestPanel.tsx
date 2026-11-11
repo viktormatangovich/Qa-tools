@@ -339,7 +339,7 @@ export function LoadTestPanel({ request }: LoadTestPanelProps) {
                 >
                   <button
                     onClick={() => handleViewHistoryResult(saved)}
-                    className="flex-1 text-left hover:text-accent"
+                    className="min-w-0 flex-1 text-left hover:text-accent"
                   >
                     <div className="font-medium truncate">{saved.method} {new URL(saved.url).pathname}</div>
                     <div className="text-[10px] text-text-muted">

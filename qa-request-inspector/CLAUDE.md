@@ -57,7 +57,7 @@ src/sidepanel/
 ├── hooks/               # useCapture, useCaptureSettings, useQaAnalysis, useRules, useSessions, useCollections, usePreferences, useStepRecorder, useJiraSettings, useFieldUsage
 ├── qa/                  # UI-free logic: rules engine, contract checker, reports, masking, team tools (steps, Playwright), jira.ts
 ├── locales/             # ru.ts (source dictionary), en.ts (typed as typeof ru), index.ts (t(), setLanguage)
-└── utils/               # generators/exporters, harImport.ts, graphql.ts, hex.ts, settingsTransfer.ts, storage.ts (typed chrome.storage.local), requestList.ts, download.ts, pageMessaging.ts
+└── utils/               # generators/exporters, harImport.ts, graphql.ts, hex.ts, settingsTransfer.ts, storage.ts (typed chrome.storage.local), requestList.ts, download.ts, pageMessaging.ts, formBody.ts (form-urlencoded decode/encode for components/common/BodyEditor)
 
 public/
 ├── manifest.json        # Extension manifest v3
