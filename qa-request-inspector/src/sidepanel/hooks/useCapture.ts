@@ -49,7 +49,10 @@ function prepend(previous: ApiRequest[], request: ApiRequest, limit: number): Ap
  * see them. `onTabChanged` is called when the window starts capturing a different tab.
  * `maxRequests` is the per-tab limit from the capture settings.
  */
-export function useCapture(onTabChanged: () => void, maxRequests: number) {
+/** `onPickCommand`: the keyboard shortcut of the element picker was pressed in this window. */
+export function useCapture(onTabChanged: () => void, maxRequests: number, onPickCommand?: () => void) {
+  const onPickCommandRef = useRef(onPickCommand);
+  onPickCommandRef.current = onPickCommand;
   const [requests, setRequests] = useState<ApiRequest[]>([]);
   const [consoleErrors, setConsoleErrors] = useState<ConsoleError[]>([]);
   const [debuggerStatus, setDebuggerStatus] = useState<DebuggerStatus>('detached');
@@ -129,6 +132,9 @@ export function useCapture(onTabChanged: () => void, maxRequests: number) {
       }
       case 'BREAKPOINT_REQUEST_EXPIRED':
         setPausedRequests((previous) => previous.filter((item) => item.requestId !== message.requestId));
+        break;
+      case 'PICK_ELEMENT_COMMAND':
+        onPickCommandRef.current?.();
         break;
     }
   }, []);

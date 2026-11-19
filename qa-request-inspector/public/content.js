@@ -577,6 +577,238 @@ class StepRecorder {
 
 const stepRecorder = new StepRecorder();
 
+// ========================================
+// Element picker: the user clicks an element (a counter, a badge) and the panel looks for its
+// value in the captured responses.
+// ========================================
+
+class ElementPicker {
+  constructor() {
+    this.resolve = null;
+    this.box = null;
+    this.label = null;
+    this.current = null;
+    this.timer = null;
+    this.onMove = this.onMove.bind(this);
+    this.onClick = this.onClick.bind(this);
+    this.swallow = this.swallow.bind(this);
+    this.onKeyDown = this.onKeyDown.bind(this);
+  }
+
+  /** Resolves with { element } after a click or with { cancelled: true } (Esc, timeout, new start). */
+  start() {
+    this.finish({ cancelled: true });
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+      this.box = document.createElement('div');
+      this.box.setAttribute('data-reqpane-picker', '');
+      this.box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #2563eb;background:rgba(37,99,235,.12);border-radius:3px;display:none;';
+      this.label = document.createElement('div');
+      this.label.setAttribute('data-reqpane-picker', '');
+      this.label.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;background:#1e3a8a;color:#fff;font:11px/1.4 system-ui,sans-serif;padding:2px 6px;border-radius:3px;max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none;';
+      document.documentElement.append(this.box, this.label);
+      window.addEventListener('mousemove', this.onMove, true);
+      window.addEventListener('click', this.onClick, true);
+      for (const type of ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'dblclick', 'contextmenu']) {
+        window.addEventListener(type, this.swallow, true);
+      }
+      window.addEventListener('keydown', this.onKeyDown, true);
+      // The panel may be closed while picking and cannot tell the page: do not stay armed forever.
+      this.timer = setTimeout(() => this.finish({ cancelled: true }), 120000);
+    });
+  }
+
+  finish(result) {
+    if (!this.resolve) return;
+    const resolve = this.resolve;
+    this.resolve = null;
+    clearTimeout(this.timer);
+    clearTimeout(this.hoverTimer);
+    window.removeEventListener('mousemove', this.onMove, true);
+    window.removeEventListener('click', this.onClick, true);
+    for (const type of ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'dblclick', 'contextmenu']) {
+      window.removeEventListener(type, this.swallow, true);
+    }
+    window.removeEventListener('keydown', this.onKeyDown, true);
+    this.box?.remove();
+    this.label?.remove();
+    this.box = this.label = this.current = null;
+    resolve(result);
+  }
+
+  target(event) {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    return element && !element.hasAttribute('data-reqpane-picker') ? element : null;
+  }
+
+  textOf(element) {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+      return String(element.value || '');
+    }
+    const text = element instanceof HTMLElement ? element.innerText : element.textContent;
+    return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  onMove(event) {
+    const element = this.target(event);
+    if (!element || element === this.current) return;
+    this.current = element;
+    const rect = element.getBoundingClientRect();
+    Object.assign(this.box.style, { display: 'block', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    const text = this.textOf(element).slice(0, 60);
+    const base = `${element.tagName.toLowerCase()}${text ? ` · ${text}` : ''}`;
+    this.label.textContent = base;
+    const top = rect.top > 22 ? rect.top - 22 : rect.bottom + 4;
+    Object.assign(this.label.style, { display: 'block', left: `${Math.max(0, rect.left)}px`, top: `${top}px` });
+    // Ask the panel how many matches the element has, once the cursor rests on it.
+    clearTimeout(this.hoverTimer);
+    this.hoverTimer = setTimeout(() => {
+      chrome.runtime.sendMessage({ type: 'PICKER_HOVER', element: this.describe(element) }).then((reply) => {
+        if (this.current === element && this.label && reply && reply.label) this.label.textContent = `${base} → ${reply.label}`;
+      }, () => {});
+    }, 200);
+  }
+
+  swallow(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  }
+
+  onClick(event) {
+    this.swallow(event);
+    const element = this.target(event);
+    if (!element) return;
+    // Kept for "watch the element": only the frame that holds it starts watching.
+    this.lastPicked = element;
+    this.finish({ element: this.describe(element) });
+  }
+
+  onKeyDown(event) {
+    if (event.key !== 'Escape') return;
+    this.swallow(event);
+    this.finish({ cancelled: true });
+  }
+
+  /** Text and the attributes that often keep the exact value of a shortened one ("1.2K" → title="1234"). */
+  describe(element) {
+    const attributes = [];
+    let node = element;
+    for (let level = 0; node && level < 3; level += 1, node = node.parentElement) {
+      for (const attribute of Array.from(node.attributes || [])) {
+        const name = attribute.name.toLowerCase();
+        const wanted = name === 'title' || name === 'aria-label' || name === 'aria-valuenow' || name === 'value' || name.startsWith('data-');
+        const value = attribute.value.trim();
+        if (wanted && value && value.length <= 120 && !attributes.some((item) => item.value === value)) {
+          attributes.push({ name: level === 0 ? name : `${'../'.repeat(level)}${name}`, value });
+        }
+      }
+    }
+    return {
+      tag: element.tagName.toLowerCase(),
+      text: this.textOf(element).slice(0, 300),
+      attributes: attributes.slice(0, 20),
+      selector: domSearcher.generateSelector(element),
+      parts: this.partsOf(element),
+      ...(window !== window.top ? { frameUrl: location.href } : {}),
+    };
+  }
+
+  /** Separate texts inside the element: the cells of a row, the lines of a card. */
+  partsOf(element) {
+    const parts = [];
+    const add = (value) => {
+      const text = String(value || '').replace(/\s+/g, ' ').trim();
+      if (text && text.length <= 100 && !parts.includes(text)) parts.push(text);
+    };
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const tag = node.tagName.toLowerCase();
+          if (['script', 'style', 'noscript', 'template', 'svg'].includes(tag)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_SKIP;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    let node;
+    while (parts.length < 20 && (node = walker.nextNode())) add(node.textContent);
+    element.querySelectorAll?.('input, textarea, select').forEach((control) => add(control.value));
+    return parts.slice(0, 20);
+  }
+}
+
+const elementPicker = new ElementPicker();
+
+// ========================================
+// Element watcher: reports every change of the picked element's text, so the panel can tell which
+// request brought the new value (or that none did and the page computed it).
+// ========================================
+
+class ElementWatcher {
+  constructor() {
+    this.observer = null;
+    this.pending = null;
+  }
+
+  /** Starts on the element picked last in this frame; false when this frame has none. */
+  start() {
+    const element = elementPicker.lastPicked;
+    if (!element) return false;
+    this.stop();
+    this.element = element;
+    this.selector = domSearcher.generateSelector(element);
+    this.last = elementPicker.textOf(element);
+    this.observer = new MutationObserver(() => this.schedule());
+    this.observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    return true;
+  }
+
+  stop() {
+    this.observer?.disconnect();
+    this.observer = null;
+    clearTimeout(this.pending);
+    this.pending = null;
+  }
+
+  schedule() {
+    if (this.pending) return;
+    this.pending = setTimeout(() => {
+      this.pending = null;
+      this.check();
+    }, 100);
+  }
+
+  /** The watched element; a framework may have replaced it, then it is found again by selector. */
+  current() {
+    if (this.element && this.element.isConnected) return this.element;
+    try {
+      const found = document.querySelector(this.selector);
+      if (found) this.element = found;
+      return found;
+    } catch {
+      return null;
+    }
+  }
+
+  check() {
+    const element = this.current();
+    const text = element ? elementPicker.textOf(element) : null;
+    if (text === this.last) return;
+    const from = this.last;
+    this.last = text;
+    chrome.runtime.sendMessage({
+      type: 'ELEMENT_WATCH_CHANGED',
+      from,
+      to: text,
+      at: Date.now(),
+      element: element ? elementPicker.describe(element) : null,
+    }).catch(() => {});
+  }
+}
+
+const elementWatcher = new ElementWatcher();
+
 // Handle DOM search messages from side panel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'START_STEP_RECORDING') {
@@ -587,6 +819,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'STOP_STEP_RECORDING') {
     stepRecorder.stop();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'START_ELEMENT_PICK') {
+    elementPicker.start().then(sendResponse);
+    return true;
+  }
+
+  if (message.type === 'START_ELEMENT_WATCH') {
+    // Sent to every frame: only the one holding the picked element answers.
+    if (!elementWatcher.start()) return false;
+    sendResponse({ text: elementWatcher.last });
+    return true;
+  }
+
+  if (message.type === 'STOP_ELEMENT_WATCH') {
+    elementWatcher.stop();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'CANCEL_ELEMENT_PICK') {
+    elementPicker.finish({ cancelled: true });
     sendResponse({ success: true });
     return true;
   }

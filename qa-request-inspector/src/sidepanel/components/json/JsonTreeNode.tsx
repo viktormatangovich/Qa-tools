@@ -85,6 +85,7 @@ export function JsonTreeNode({
   return (
     <div role="treeitem" aria-expanded={isExpandable ? isExpanded : undefined}>
       <div
+        data-json-path={path}
         data-search-match={isMatch ? 'true' : undefined}
         className={`flex items-center gap-1 py-0.5 rounded hover:bg-hover cursor-pointer group ${
           isMatch ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''

@@ -31,11 +31,26 @@ export interface OpenApiSchema {
   $ref?: string;
 }
 
+/** How much of the specification the captured requests exercised. */
+export interface ContractCoverage {
+  total: number;
+  exercised: number;
+  validated: number;
+  passed: number;
+  failed: number;
+  /** Captured requests that were compared with the specification. */
+  captured: number;
+  /** A few "METHOD /path" of captured requests that match no documented operation. */
+  unmatched: string[];
+}
+
 export interface OpenApiParameter {
   name: string;
   in: "path" | "query" | "header";
   required?: boolean;
   schema?: OpenApiSchema;
+  style?: string;
+  explode?: boolean;
   $ref?: string;
 }
 

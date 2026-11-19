@@ -37,3 +37,6 @@ public/image*.png
 
 # Isolated QA browser profiles
 .qa-browser-profile*/
+
+# TypeScript incremental build info
+*.tsbuildinfo

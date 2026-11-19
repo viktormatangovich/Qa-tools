@@ -4,7 +4,9 @@ import {
   BarChart3,
   Bookmark,
   CheckSquare,
+  Crosshair,
   Download,
+  Eye,
   FileJson,
   FileSearch,
   FileSpreadsheet,
@@ -46,10 +48,25 @@ import { useQaAnalysis } from './hooks/useQaAnalysis';
 import { useRules } from './hooks/useRules';
 import { useSessions } from './hooks/useSessions';
 import { useStepRecorder } from './hooks/useStepRecorder';
-import { t } from './locales';
+import { useElementPicker } from './hooks/useElementPicker';
+import { dateLocale, t } from './locales';
 import type { QAIssue, QAIssueCategory, QAIssueSeverity } from './qa';
 import { maskRequest, maskRequests } from './qa/masking';
 import type { NegativeScenario } from './qa/negativeTesting';
+import { candidatesOf, findValueInRequests, partsOf, previewValue, searchTermFor, streamRequests, type ValueMatch } from './utils/valueFinder';
+import { useElementWatch } from './hooks/useElementWatch';
+import { useStreamMessages } from './hooks/useStreamMessages';
+
+/** Path and query of a URL, for short labels. */
+function shortPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+import type { FocusField } from './components/detail/RequestDetail';
 import { createSessionReport, createSessionReportHtml, createSessionReportJson } from './qa/report';
 import type {
   ApiRequest,
@@ -78,6 +95,7 @@ const SessionHistory = lazyComponent(() => import('./components/sessions/Session
 const SettingsPanel = lazyComponent(() => import('./components/settings/SettingsPanel').then((module) => module.SettingsPanel));
 const CollectionManager = lazyComponent(() => import('./components/collections/CollectionManager').then((module) => module.CollectionManager));
 const CollectionViewer = lazyComponent(() => import('./components/collections/CollectionViewer').then((module) => module.CollectionViewer));
+const ValueFinderDialog = lazyComponent(() => import('./components/finder/ValueFinderDialog').then((module) => module.ValueFinderDialog));
 const TagManager = lazyComponent(() => import('./components/collections/TagManager').then((module) => module.TagManager));
 
 const sortPresets = SORT_PRESETS;
@@ -114,6 +132,14 @@ export default function App() {
   const [viewingCollection, setViewingCollection] = useState<RequestCollection | null>(null);
   const [showTagManager, setShowTagManager] = useState(false);
 
+  // Element picker: a clicked page element is looked up in the responses; a chosen match opens
+  // its request with the field in view, and closing that request returns to the results.
+  const pickCommandRef = useRef<() => void>(() => {});
+  const [lastMatch, setLastMatch] = useState<ValueMatch | null>(null);
+  const [finderOpen, setFinderOpen] = useState(false);
+  const [pickCount, setPickCount] = useState(0);
+  const [focusField, setFocusField] = useState<FocusField | null>(null);
+
   // Comparing two requests
   const [compareMode, setCompareMode] = useState(false);
   const [compareRequests, setCompareRequests] = useState<[ApiRequest | null, ApiRequest | null]>([null, null]);
@@ -125,10 +151,12 @@ export default function App() {
 
   // ---- State that lives in hooks --------------------------------------------------------------
   const clearDomFindingsRef = useRef<() => void>(() => {});
+  const watchStopRef = useRef<() => void>(() => {});
   const handleTabChanged = useCallback(() => {
     setSelectedRequest(null);
     setSelectedError(null);
     clearDomFindingsRef.current();
+    watchStopRef.current(); // the watched element belongs to the previous tab
   }, []);
 
   const { captureSettings, updateCaptureSettings } = useCaptureSettings();
@@ -136,7 +164,16 @@ export default function App() {
     requests, consoleErrors, debuggerStatus, debuggerError, pausedRequests, capturedTabId, snapshot,
     reconnectDebugger, resumePausedRequest, replaceRequests, showSnapshot, returnToCapture, captureScreenshot,
     clearRequests: clearCapturedRequests, clearConsoleErrors: clearCapturedErrors,
-  } = useCapture(handleTabChanged, captureSettings.maxRequests);
+  } = useCapture(handleTabChanged, captureSettings.maxRequests, () => pickCommandRef.current());
+  // The picker searches WebSocket/SSE messages too; they are polled only once it has been used.
+  const [finderUsed, setFinderUsed] = useState(false);
+  const streamMessages = useStreamMessages(finderUsed);
+  const finderRequests = useMemo(() => [...requests, ...streamRequests(streamMessages)], [requests, streamMessages]);
+  const finderRequestsRef = useRef(finderRequests);
+  finderRequestsRef.current = finderRequests;
+  const picker = useElementPicker(finderRequests, capturedTabId);
+  const watch = useElementWatch(finderRequests, capturedTabId);
+  watchStopRef.current = watch.stop;
 
   // Recorded steps are linked to the requests captured after them.
   const requestsRef = useRef(requests);
@@ -401,6 +438,79 @@ export default function App() {
     },
   });
 
+  const pickElement = async () => {
+    if (picker.picking) {
+      picker.cancel();
+      return;
+    }
+    setFinderOpen(false);
+    setFocusField(null);
+    setSelectedRequest(null);
+    setFinderUsed(true);
+    if (watch.active) watch.stop(); // a new element replaces the watched one
+    const element = await picker.start();
+    if (!element) return;
+    setPickCount((count) => count + 1);
+    // A single match opens its request straight away; several or none show the list.
+    // Requests that arrived while the user was picking count too.
+    const matches = findValueInRequests(finderRequestsRef.current, candidatesOf(element), { parts: partsOf(element), limit: 2 });
+    if (matches.length === 1) openValueMatch(matches[0], element.text, false);
+    else setFinderOpen(true);
+  };
+
+  const openValueMatch = (match: ValueMatch, query: string, fromList = true) => {
+    setLastMatch(match);
+    setFocusField({
+      requestId: match.request.id,
+      path: match.path,
+      ancestors: match.ancestors,
+      search: searchTermFor(match, query),
+      fromList,
+      section: match.section,
+      value: match.value,
+      pageValue: picker.picked?.text ?? query,
+    });
+    setFinderOpen(false);
+    setSelectedRequest(match.request);
+  };
+
+  pickCommandRef.current = () => void pickElement();
+
+  /** Bug report draft: the value shown on the page next to the field it was found in. */
+  const reportValueMismatch = () => {
+    const element = picker.picked;
+    const match = lastMatch;
+    if (!element || !match) return;
+    const field = match.path.replace(/^root\.?/, '') || t().valueFinderWholeBody;
+    const pageValue = element.text.slice(0, 120);
+    setBugReportIssue({
+      id: crypto.randomUUID(),
+      ruleId: 'page-value',
+      category: 'dom',
+      severity: 'warning',
+      title: t().valueBugTitle(pageValue, field),
+      description: t().valueBugDescription({
+        pageValue,
+        selector: element.selector,
+        frameUrl: element.frameUrl,
+        request: `${match.request.method} ${match.request.url}`,
+        field,
+        responseValue: previewValue(match.value),
+      }),
+      timestamp: Date.now(),
+      url: match.request.url,
+      requestId: match.request.id,
+      evidence: { selector: element.selector, field },
+    });
+  };
+
+  const closeRequestDetail = () => {
+    // A request opened from the picker results goes back to them.
+    if (focusField?.fromList && focusField.requestId === selectedRequest?.id && picker.picked) setFinderOpen(true);
+    setFocusField(null);
+    setSelectedRequest(null);
+  };
+
   return (
     <div className="app-shell flex flex-col" key={language}>
       {/* Header */}
@@ -431,6 +541,17 @@ export default function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-1">
+            <button
+              onClick={() => void pickElement()}
+              className={`p-1.5 rounded transition-colors ${picker.picking
+                ? 'bg-[var(--color-accent)] text-white animate-pulse'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)]'
+                }`}
+              title={picker.picking ? t().pickElementActive : t().pickElement}
+              aria-pressed={picker.picking}
+            >
+              <Crosshair className="w-3.5 h-3.5" />
+            </button>
             <button
               onClick={() => setShowBreakpointManager(true)}
               className={`p-1.5 rounded transition-colors ${breakpointRules.some((r) => r.enabled)
@@ -813,6 +934,44 @@ export default function App() {
             </div>
           </div>
         )}
+        {(picker.picking || picker.error) && (
+          <p className={`mt-2 text-[11px] ${picker.error ? 'text-red-500' : 'text-[var(--color-accent)]'}`} role="status">
+            {picker.error ? t().pickElementFailed(picker.error) : t().pickElementActive}
+          </p>
+        )}
+        {watch.error && !watch.active && <p className="mt-2 text-[11px] text-red-500" role="status">{t().watchFailed}</p>}
+        {watch.active && (
+          <div className="mt-2 rounded-lg border border-[var(--color-accent)]/40 bg-[var(--color-accent-light)] px-2.5 py-1.5 text-[11px]" role="status">
+            <div className="flex items-center gap-2">
+              <Eye className="w-3.5 h-3.5 text-[var(--color-accent)] animate-pulse shrink-0" />
+              <span className="min-w-0 truncate">{t().watchActive(watch.initialText ?? '', watch.changes.length)}</span>
+              <button onClick={watch.stop} className="ml-auto text-[var(--color-accent)] hover:underline shrink-0">{t().watchStop}</button>
+            </div>
+            {watch.changes.length === 0 && <p className="mt-1 text-[var(--color-text-muted)]">{t().watchWaiting}</p>}
+            <ul className="mt-1 space-y-1 max-h-40 overflow-y-auto">
+              {watch.changes.slice(0, 8).map((change) => {
+                const best = change.matches[0];
+                return (
+                  <li key={change.at} className="min-w-0">
+                    <span className="text-[var(--color-text-muted)]">{new Date(change.at).toLocaleTimeString(dateLocale())}</span>{' '}
+                    <span className="font-mono">{change.from ?? '∅'} → {change.to ?? '∅'}</span>{' '}
+                    {best ? (
+                      <button
+                        onClick={() => openValueMatch(best, change.to ?? '', false)}
+                        className="text-[var(--color-accent)] hover:underline font-mono break-all text-left"
+                        title={best.request.url}
+                      >
+                        {best.request.method} {shortPath(best.request.url)} · {best.path.replace(/^root\.?/, '') || t().valueFinderWholeBody}
+                      </button>
+                    ) : (
+                      <span className="text-amber-700 dark:text-amber-400">{t().watchNotFromRequests(change.checked)}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </header>
 
       {/* Debugger disconnected banner */}
@@ -1029,7 +1188,7 @@ export default function App() {
       {/* Request Detail Bottom Sheet */}
       <Dialog.Root
         open={!!selectedRequest}
-        onOpenChange={(open) => !open && setSelectedRequest(null)}
+        onOpenChange={(open) => !open && closeRequestDetail()}
       >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
@@ -1037,7 +1196,11 @@ export default function App() {
             {selectedRequest && (
               <RequestDetail
                 request={selectedRequest}
-                onClose={() => setSelectedRequest(null)}
+                onClose={closeRequestDetail}
+                focusField={focusField?.requestId === selectedRequest.id ? focusField : null}
+                onReportMismatch={picker.picked && lastMatch ? reportValueMismatch : undefined}
+                onWatch={picker.picked && !watch.active ? () => { closeRequestDetail(); setFinderOpen(false); void watch.start(); } : undefined}
+                onShowAllMatches={picker.picked ? () => { setFocusField(null); setSelectedRequest(null); setFinderOpen(true); } : undefined}
                 onCopy={() => copyToClipboard(selectedRequest)}
                 copied={copied}
                 mockRules={mockRules}
@@ -1050,6 +1213,25 @@ export default function App() {
                 contractDocument={contractDocument}
                 collections={collections}
                 onAddToCollection={addRequestToCollection}
+              />
+            )}
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={finderOpen && !!picker.picked} onOpenChange={(open) => !open && setFinderOpen(false)}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 bg-black/40 z-40" />
+          <Dialog.Popup className="panel-dialog fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] rounded-t-2xl flex flex-col shadow-xl">
+            {picker.picked && (
+              <ValueFinderDialog
+                key={pickCount}
+                picked={picker.picked}
+                requests={finderRequests}
+                onOpenMatch={openValueMatch}
+                onPickAgain={() => void pickElement()}
+                onWatch={watch.active ? undefined : () => { setFinderOpen(false); void watch.start(); }}
+                onClose={() => setFinderOpen(false)}
               />
             )}
           </Dialog.Popup>

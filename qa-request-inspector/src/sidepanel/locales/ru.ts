@@ -1,3 +1,4 @@
+import type { ContractCoverage } from "../qa/contract/types";
 export const ru = {
   // JSON Tree
   findInDom: "Найти в DOM",
@@ -632,7 +633,9 @@ export const ru = {
   loadingEllipsis: "Загрузка…",
   loadUrl: "Загрузить URL",
   loadSpecFile: "Загрузить JSON/YAML-файл",
-  contractCoverageLine: (c: { total: number; exercised: number; validated: number; passed: number; failed: number }) =>
+  contractNoRequests: "Перехваченных запросов нет: откройте проверяемую страницу и выполните действия, вызывающие API.",
+  contractNoMatches: (captured: number, examples: string[]) => `Ни один из ${captured} перехваченных запросов не совпал с путями спецификации${examples.length ? `, например: ${examples.join(", ")}` : ""}. Проверьте, что спецификация описывает именно эти адреса.`,
+  contractCoverageLine: (c: Omit<ContractCoverage, "captured" | "unmatched">) =>
     `Покрытие API-контракта: ${c.exercised}/${c.total} операций · проверено ${c.validated} · успешно ${c.passed} · ошибок ${c.failed}`,
   deterministicValues: "Детерминированные тестовые значения",
   contractDiffTitle: "Сравнение контрактов (текущий → сравниваемый)",
@@ -741,4 +744,67 @@ export const ru = {
   teamTextCopied: "Текст скопирован.",
   teamCopyFailed: "Не удалось скопировать текст.",
   teamDownloadText: "Скачать текст",
+
+  // Element picker → value in responses
+  pickElement: "Найти элемент страницы в запросах: кликните счётчик, дату или строку таблицы (Alt+Shift+F)",
+  pickElementActive: "Кликните элемент на странице (Esc — отмена)",
+  pickElementFailed: (message: string) => `Не удалось включить выбор элемента на этой странице: ${message}`,
+  valueFinderTitle: "Значение со страницы в запросах",
+  valueFinderValue: "Искомое значение из",
+  valueFinderPickAgain: "Выбрать другой",
+  valueFinderAlsoAttributes: "Также ищем атрибуты:",
+  valueFinderChecked: (n: number) => `Проверено ответов с телом: ${n}`,
+  valueFinderFound: (n: number) => `совпадений: ${n}`,
+  valueFinderLimited: (n: number) => `показаны первые ${n}`,
+  valueFinderNoMatches: "В захваченных ответах значение не найдено. Возможно, страница вычисляет его сама (сумма, длина отфильтрованного списка) или запрос прошёл до открытия панели — тогда перезагрузите страницу и выберите элемент снова. Можно поправить значение в поле выше.",
+  valueFinderWholeBody: "(всё тело)",
+  valueFinderFoundAt: "Значение со страницы в поле",
+  valueFinderAllMatches: "Все совпадения",
+  valueFinderFromAttribute: (name: string) => `из ${name}`,
+  valueFinderKinds: {
+    exact: "точно", number: "число", converted: "в других единицах", date: "дата", row: "строка",
+    approx: "≈ округлено", length: "длина массива", computed: "вычислено", contains: "в тексте",
+  },
+  valueFinderNotes: {
+    percent: "доля: 45% хранится как 0.45",
+    cents: "в копейках / центах",
+    seconds: "в секундах",
+    milliseconds: "в миллисекундах",
+    minutes: "в минутах",
+  },
+  valueFinderRow: (matched: number, total: number) => `совпало текстов строки: ${matched} из ${total}`,
+  valueFinderComputedCount: (formula: string) => `страница может считать: ${formula}`,
+  valueFinderComputedSum: (formula: string) => `страница может считать: ${formula}`,
+  valueFinderInFrame: (url: string) => `Элемент внутри iframe: ${url}`,
+  valueFinderParts: "Тексты строки:",
+  pickElementShortcutHint: "Горячая клавиша выбора элемента; изменить: chrome://extensions/shortcuts",
+  pickHoverMatches: (n: number) => (n === 0 ? "нет в ответах" : `совпадений: ${n}`),
+  valueFinderSections: {
+    response: "ответ", headers: "заголовок ответа", query: "параметр URL", requestBody: "тело запроса", stream: "сообщение потока",
+  },
+  queryParams: "Параметры URL",
+  valuePatchButton: "Подменить",
+  valuePatchHint: "Создать правило «patch»: подставить в это поле другое значение и проверить, как страница его покажет (после перезагрузки или повтора действия)",
+  valuePatchCurrent: "текущее",
+  valuePatchDescription: (field: string, pageValue: string, value: string) => `Подмена ${field} = ${value} (на странице было «${pageValue}»)`,
+  watchButton: "Следить",
+  watchHint: "Следить за элементом: при каждом изменении его текста показать, какой запрос принёс новое значение",
+  watchActive: (text: string, changes: number) => `Слежу за «${text}» · изменений: ${changes}`,
+  watchStop: "Стоп",
+  watchWaiting: "Выполните действие на странице — изменения появятся здесь.",
+  watchNotFromRequests: (checked: number) =>
+    checked === 0
+      ? "запросов перед изменением не было — значение посчитано на странице"
+      : `в ${checked} запросах перед изменением такого значения нет — вероятно, посчитано на странице`,
+  watchFailed: "Не удалось начать слежение: выбранного элемента больше нет на странице. Выберите его снова.",
+  valueBugButton: "В баг-репорт",
+  valueBugHint: "Черновик баг-репорта: значение на странице и поле ответа, со скриншотом",
+  valueBugTitle: (pageValue: string, field: string) => `Значение «${pageValue}» на странице не соответствует полю ${field}`,
+  valueBugDescription: (info: { pageValue: string; selector: string; frameUrl?: string; request: string; field: string; responseValue: string }) =>
+    [
+      `На странице: «${info.pageValue}» (${info.selector}${info.frameUrl ? `, iframe ${info.frameUrl}` : ""})`,
+      `В ответе: ${info.request}`,
+      `Поле: ${info.field} = ${info.responseValue}`,
+      "Ожидалось: <опишите, какое значение должно быть на странице>",
+    ].join("\n"),
 };

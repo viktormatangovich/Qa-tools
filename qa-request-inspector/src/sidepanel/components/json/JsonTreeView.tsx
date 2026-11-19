@@ -17,6 +17,8 @@ interface JsonTreeViewProps {
   searchPlaceholder?: string
   searchQuery?: string
   onSearchChange?: (query: string) => void
+  /** A node to open and scroll to (a match of the element picker). */
+  focus?: { path: string; ancestors: string[] } | null
 }
 
 export function JsonTreeView({
@@ -29,6 +31,7 @@ export function JsonTreeView({
   searchPlaceholder,
   searchQuery = '',
   onSearchChange,
+  focus,
 }: JsonTreeViewProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(['root']))
 
@@ -80,13 +83,39 @@ export function JsonTreeView({
     }
   }
 
+  // Open the parents of the focused node during render, like for search matches above.
+  const [expandedForFocus, setExpandedForFocus] = useState(focus)
+  if (expandedForFocus !== focus) {
+    setExpandedForFocus(focus)
+    if (focus) {
+      setExpandedPaths(prev => {
+        const next = new Set(prev)
+        focus.ancestors.forEach(path => next.add(path))
+        return next
+      })
+    }
+  }
+
   const treeRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!focus || !treeRef.current) return
+    const row = treeRef.current.querySelector(`[data-json-path="${CSS.escape(focus.path)}"]`) as HTMLElement | null
+    if (!row) return
+    row.scrollIntoView({ block: 'center' })
+    row.classList.add('ring-2', 'ring-accent', 'bg-accent-light')
+    return () => row.classList.remove('ring-2', 'ring-accent', 'bg-accent-light')
+  }, [focus])
   const [focusedMatchIndex, setFocusedMatchIndex] = useState(0)
 
   // Scroll to the first match when search query changes
   useEffect(() => {
     if (!searchQuery.trim() || !treeRef.current) return
-    setFocusedMatchIndex(0)
+    // Opened by the element picker: Enter continues from the picked field, which the focus effect
+    // has already scrolled to, instead of jumping to the first match.
+    const focusIndex = focus ? search.paths.indexOf(focus.path) : -1
+    setFocusedMatchIndex(Math.max(0, focusIndex))
+    if (focusIndex >= 0) return
     const firstMatch = treeRef.current.querySelector('[data-search-match="true"]') as HTMLElement | null
     if (firstMatch) {
       firstMatch.scrollIntoView({ block: 'center', behavior: 'smooth' })

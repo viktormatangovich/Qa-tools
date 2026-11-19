@@ -370,6 +370,17 @@ chrome.runtime.onConnect.addListener((port) => {
   void registerPanel(port, windowId);
 });
 
+// Keyboard shortcut (manifest "commands"): starts the element picker in the panel of that window.
+// Without an open panel the shortcut opens it; picking then starts from the panel button.
+chrome.commands?.onCommand?.addListener((command, tab) => {
+  if (command !== "pick-element") return;
+  const windowId = tab?.windowId;
+  if (windowId === undefined) return;
+  const panel = panels.get(windowId);
+  if (panel) post(panel, { type: "PICK_ELEMENT_COMMAND" });
+  else chrome.sidePanel?.open({ windowId }).catch(() => {});
+});
+
 // Tab switching while a side panel is open in that window
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   if (!panels.has(activeInfo.windowId)) return;

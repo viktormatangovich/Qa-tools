@@ -1,7 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import type { ApiRequest } from "../../types";
 import type { QAIssue } from "../core/types";
-import type { ContractViolation, MatchedEndpoint, OpenApiDocument, OpenApiMediaTypes, OpenApiOperation, OpenApiParameter, OpenApiSchema } from "./types";
+import type { ContractCoverage, ContractViolation, MatchedEndpoint, OpenApiDocument, OpenApiMediaTypes, OpenApiOperation, OpenApiParameter, OpenApiSchema } from "./types";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options", "trace"];
 const MAX_VIOLATIONS = 100;
@@ -195,7 +195,8 @@ function compilePaths(document: OpenApiDocument): CompiledPath[] {
     compiled = Object.keys(document.paths)
       .map((pathTemplate) => ({
         pathTemplate,
-        expression: new RegExp(`^(?:${prefix})${escapeRegExp(pathTemplate).replace(/\\\{[^}]+\\\}/g, "[^/]+")}/?$`),
+        // A trailing slash is optional on both sides: "/items/{id}/" matches "/items/5" and the other way round.
+        expression: new RegExp(`^(?:${prefix})${escapeRegExp(pathTemplate.replace(/\/+$/, "")).replace(/\\\{[^}]+\\\}/g, "[^/]+")}/?$`),
         parameterCount: (pathTemplate.match(/\{[^}]+\}/g) || []).length,
       }))
       // "/users/me" must win over "/users/{id}".
@@ -449,6 +450,32 @@ function operationParameters(document: OpenApiDocument, pathTemplate: string, op
   return [...byKey.values()];
 }
 
+const schemaTypes = (schema: OpenApiSchema | undefined): string[] =>
+  schema?.type === undefined ? [] : Array.isArray(schema.type) ? schema.type : [schema.type];
+
+/** A raw string as the documented scalar type; values that cannot be converted stay strings and fail the type check. */
+function scalarValue(text: string, schema: OpenApiSchema | undefined, document: OpenApiDocument): unknown {
+  const types = schemaTypes(dereference(schema, document));
+  if ((types.includes("integer") || types.includes("number")) && text.trim() !== "" && !Number.isNaN(Number(text))) return Number(text);
+  if (types.includes("boolean") && (text === "true" || text === "false")) return text === "true";
+  return text;
+}
+
+/**
+ * The parameter value as the schema sees it. Arrays follow the serialization rules of OpenAPI:
+ * query `form` with explode (default) repeats the name (`?id=1&id=2`), without explode it is comma-separated;
+ * `spaceDelimited` / `pipeDelimited` use their separators; path and header values (`simple`) are comma-separated.
+ */
+function parameterValue(parameter: OpenApiParameter, raw: string[], document: OpenApiDocument): unknown {
+  const schema = dereference(parameter.schema, document);
+  if (!schemaTypes(schema).includes("array")) return scalarValue(raw[0], parameter.schema, document);
+  const style = parameter.style || (parameter.in === "query" ? "form" : "simple");
+  const explode = parameter.explode ?? style === "form";
+  const separator = style === "spaceDelimited" ? /s+|%20/ : style === "pipeDelimited" ? "|" : ",";
+  const items = style === "form" && explode ? raw : raw.flatMap((value) => value.split(separator));
+  return items.map((item) => scalarValue(item, schema?.items, document));
+}
+
 export function validateRequest(document: OpenApiDocument, request: ApiRequest): ContractViolation[] {
   const matched = matchEndpoint(document, request);
   if (!matched) return [];
@@ -458,18 +485,17 @@ export function validateRequest(document: OpenApiDocument, request: ApiRequest):
   const pathValues = url.pathname.replace(/\/+$/, "").split("/").reverse();
   const templateValues = matched.pathTemplate.replace(/\/+$/, "").split("/").reverse();
   for (const parameter of operationParameters(document, matched.pathTemplate, matched.operation)) {
-    const actual = parameter.in === "query" ? url.searchParams.get(parameter.name)
-      : parameter.in === "header" ? header(request.requestHeaders, parameter.name.toLowerCase())
-      : parameter.in === "path" ? pathValues[templateValues.findIndex((part) => part === `{${parameter.name}}`)] || null
+    const raw: string[] | undefined = parameter.in === "query" ? url.searchParams.getAll(parameter.name)
+      : parameter.in === "header" ? [header(request.requestHeaders, parameter.name.toLowerCase())].filter((value): value is string => value !== undefined)
+      : parameter.in === "path" ? [pathValues[templateValues.findIndex((part) => part === `{${parameter.name}}`)]].filter(Boolean)
       : undefined;
-    if (actual === undefined) continue; // cookies and other places are not checked
-    if (parameter.required && !actual) violations.push({ location: "request", path: `$.${parameter.in}.${parameter.name}`, message: "Отсутствует обязательный параметр." });
-    if (actual) {
-      const schema = dereference(parameter.schema, document);
-      const types = schema?.type === undefined ? [] : Array.isArray(schema.type) ? schema.type : [schema.type];
-      const typedActual: unknown = types.includes("integer") || types.includes("number") ? Number(actual) : types.includes("boolean") ? actual === "true" : actual;
-      validateSchema(Number.isNaN(typedActual) ? actual : typedActual, parameter.schema, { document, violations }, `$.${parameter.in}.${parameter.name}`, "request");
+    if (raw === undefined) continue; // cookies and other places are not checked
+    const path = `$.${parameter.in}.${parameter.name}`;
+    if (!raw.some(Boolean)) {
+      if (parameter.required) violations.push({ location: "request", path, message: "Отсутствует обязательный параметр." });
+      continue;
     }
+    validateSchema(parameterValue(parameter, raw, document), parameter.schema, { document, violations }, path, "request");
   }
   const requestBody = dereference(matched.operation.requestBody, document);
   if (requestBody?.required && !request.requestBody) violations.push({ location: "request", path: "$", message: "Отсутствует обязательное тело запроса." });
@@ -500,12 +526,22 @@ export function contractIssues(document: OpenApiDocument, requests: ApiRequest[]
   });
 }
 
-export function contractCoverage(document: OpenApiDocument, requests: ApiRequest[]): { total: number; exercised: number; validated: number; passed: number; failed: number } {
+export function contractCoverage(document: OpenApiDocument, requests: ApiRequest[]): ContractCoverage {
   const endpointKeys = Object.entries(document.paths).flatMap(([path, operations]) => Object.keys(operations || {}).filter(method => HTTP_METHODS.includes(method)).map((method) => `${method.toUpperCase()} ${path}`));
   const matched = requests.map((request) => ({ request, endpoint: matchEndpoint(document, request) })).filter((item) => item.endpoint);
   const exercised = new Set(matched.map(({ request, endpoint }) => `${request.method} ${endpoint!.pathTemplate}`)).size;
   const failures = matched.filter(({ request }) => validateResponse(document, request).length + validateRequest(document, request).length > 0).length;
-  return { total: endpointKeys.length, exercised, validated: matched.length, passed: matched.length - failures, failed: failures };
+  const unmatched = new Set<string>();
+  for (let index = requests.length - 1; index >= 0 && unmatched.size < 3; index--) {
+    const request = requests[index];
+    if (matchEndpoint(document, request)) continue;
+    try {
+      unmatched.add(`${request.method} ${new URL(request.url).pathname}`);
+    } catch {
+      // Not a URL: nothing to show.
+    }
+  }
+  return { total: endpointKeys.length, exercised, validated: matched.length, passed: matched.length - failures, failed: failures, captured: requests.length, unmatched: [...unmatched] };
 }
 
 const UNSUPPORTED_KEYWORDS = ["if", "then", "else", "contains", "dependentRequired", "dependentSchemas", "patternProperties", "propertyNames", "prefixItems", "unevaluatedProperties"];

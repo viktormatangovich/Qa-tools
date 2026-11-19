@@ -7,6 +7,7 @@ import { parseHar } from "./harImport.ts";
 import { filterRequests } from "./requestList.ts";
 import type { ApiRequest } from "../types.ts";
 import { hexDump } from "./hex.ts";
+import { candidatesOf, findValueInRequests, parseDisplayedValue, partsOf, searchTermFor, streamRequests, explainChange } from "./valueFinder.ts";
 import { buildSettingsFile, readSettingsFile } from "./settingsTransfer.ts";
 
 // ---- GraphQL ----------------------------------------------------------------------------------
@@ -228,4 +229,165 @@ test("response search finds field names as well as values and opens their parent
   assert.deepEqual(searchJson(data, "1").paths, ["root.items.0.Price"]);
   assert.deepEqual(searchJson(data, "   ").paths, []);
   assert.deepEqual(nodeMatch("items", [], "item"), { key: true, value: false });
+});
+
+// ---- Value finder (element on the page -> field of a response) ------------------------------
+
+test("displayed numbers are read with thousands separators, decimals and short suffixes", () => {
+  assert.deepEqual(parseDisplayedValue("1 234").numbers, [1234]);
+  assert.deepEqual(parseDisplayedValue("1 234 ₸").numbers, [1234]);
+  assert.deepEqual(parseDisplayedValue("1,234").numbers, [1234, 1.234]);
+  assert.deepEqual(parseDisplayedValue("12,5").numbers, [12.5]);
+  assert.deepEqual(parseDisplayedValue("Заказы 12 из 40").numbers, [12, 40]);
+  assert.deepEqual(parseDisplayedValue("18.11.2026").numbers, []);
+  const short = parseDisplayedValue("1,2K");
+  assert.deepEqual(short.numbers, [1200]);
+  assert.deepEqual(short.ranges, [[1150, 1250]]);
+  assert.deepEqual(parseDisplayedValue("3 млн").ranges, [[2500000, 3500000]]);
+});
+
+test("a picked counter is found as a field, an array length and an approximate value", () => {
+  const request = (id: string, timestamp: number, responseBody: unknown) =>
+    ({ id, method: "GET", url: `https://api.test/${id}`, timestamp, responseBody, status: 200 }) as unknown as ApiRequest;
+  const requests = [
+    request("old", 1, { meta: { total: 12 }, id: 12 }),
+    request("new", 2, JSON.stringify({ items: new Array(12).fill(0), name: "Alpha 12" })),
+    request("views", 3, { views: 1234 }),
+    request("text", 4, "plain text"),
+  ];
+  const twelve = findValueInRequests(requests, candidatesOf({ text: "12", attributes: [] }));
+  assert.deepEqual(twelve.map((match) => [match.request.id, match.path, match.kind]).slice(0, 3), [
+    ["old", "root.meta.total", "exact"],
+    ["old", "root.id", "exact"],
+    ["new", "root.items", "length"],
+  ]);
+  assert.deepEqual(twelve[0].ancestors, ["root", "root.meta"]);
+
+  const short = findValueInRequests(requests, candidatesOf({ text: "1,2K", attributes: [{ name: "title", value: "1 234" }] }));
+  assert.equal(short[0].path, "root.views");
+  assert.equal(short[0].kind, "number");
+  assert.equal(short[0].source, "title");
+
+  const word = findValueInRequests(requests, candidatesOf({ text: "alpha", attributes: [] }));
+  assert.deepEqual(word.map((match) => [match.path, match.kind]), [["root.name", "contains"]]);
+});
+
+test("a bare number is not matched inside ids and timestamps, and the search term follows the match", () => {
+  const request = { id: "r", method: "POST", url: "https://api.test/tops", timestamp: 1, status: 200,
+    responseBody: { items: [{ comments: "482", msg_id: "799d0482ab", ts: "1794824022", tags: ["a", "b"] }] } } as unknown as ApiRequest;
+  const found = findValueInRequests([request], candidatesOf({ text: "482", attributes: [] }));
+  assert.deepEqual(found.map((match) => match.path), ["root.items.0.comments"]);
+  assert.equal(searchTermFor(found[0], "482"), "482");
+
+  const length = findValueInRequests([request], candidatesOf({ text: "2", attributes: [] }));
+  assert.equal(searchTermFor(length.find((match) => match.kind === "length")!, "2"), "tags");
+
+  const word = findValueInRequests([request], candidatesOf({ text: "d0482", attributes: [] }));
+  assert.equal(word[0].kind, "contains");
+  assert.equal(searchTermFor(word[0], " d0482 "), "d0482");
+});
+
+test("percents, money, durations and dates are read in the units a response keeps them", () => {
+  const percent = parseDisplayedValue("45%");
+  assert.deepEqual(percent.numbers, [45]);
+  assert.deepEqual(percent.derived, [{ value: 0.45, note: "percent" }]);
+  assert.deepEqual(parseDisplayedValue("12,50 ₽").derived, [{ value: 1250, note: "cents" }]);
+  const duration = parseDisplayedValue("2 ч 5 мин");
+  assert.deepEqual(duration.derived.map((item) => [item.value, item.note]), [[7500, "seconds"], [7500000, "milliseconds"], [125, "minutes"]]);
+  assert.deepEqual(parseDisplayedValue("5 сообщений").derived, []);
+
+  const day = parseDisplayedValue("18.11.2026");
+  assert.deepEqual(day.numbers, []);
+  assert.deepEqual(day.dates, [[new Date(2026, 10, 18).getTime(), new Date(2026, 10, 19).getTime()]]);
+  const minute = parseDisplayedValue("18 ноября 2026 г. в 12:30");
+  assert.deepEqual(minute.dates, [[new Date(2026, 10, 18, 12, 30).getTime(), new Date(2026, 10, 18, 12, 31).getTime()]]);
+  assert.equal(parseDisplayedValue("2026-11-18").dates.length, 1);
+  assert.equal(parseDisplayedValue("Nov 18, 2026").dates.length, 1);
+  assert.equal(parseDisplayedValue("31.02.2026").dates.length, 0);
+});
+
+const responseOf = (id: string, timestamp: number, responseBody: unknown) =>
+  ({ id, method: "GET", url: `https://api.test/${id}`, timestamp, responseBody, status: 200 }) as unknown as ApiRequest;
+
+test("converted values and dates are found with their unit", () => {
+  const seconds = new Date(2026, 10, 18, 12, 30, 15).getTime() / 1000;
+  const requests = [responseOf("r", 1, { share: 0.45, price: 1250, ttl: 7500, created: seconds, day: "2026-11-18", iso: new Date(2026, 10, 18, 12, 30).toISOString() })];
+  const find = (text: string) => findValueInRequests(requests, candidatesOf({ text, attributes: [] })).map((match) => [match.path, match.kind, match.detail?.note]);
+  assert.deepEqual(find("45%"), [["root.share", "converted", "percent"]]);
+  assert.deepEqual(find("12,50 ₸"), [["root.price", "converted", "cents"]]);
+  assert.deepEqual(find("2 ч 5 мин"), [["root.ttl", "converted", "seconds"]]);
+  assert.deepEqual(find("18.11.2026").map(([path]) => path), ["root.created", "root.day", "root.iso"]);
+  assert.deepEqual(find("18.11.2026 12:30").map(([path]) => path), ["root.created", "root.iso"]);
+});
+
+test("a counter the page computes is found as a filtered count or a sum", () => {
+  const items = [
+    { id: 1, unread: true, price: 10 }, { id: 2, unread: false, price: 20 },
+    { id: 3, unread: true, price: 30 }, { id: 4, unread: true, price: 40 },
+  ];
+  const requests = [responseOf("list", 1, { items })];
+  const three = findValueInRequests(requests, candidatesOf({ text: "3", attributes: [] }));
+  const computed = three.find((match) => match.kind === "computed");
+  assert.deepEqual(computed?.detail?.computed, { op: "count", field: "unread", equals: true });
+  assert.equal(computed?.path, "root.items");
+  assert.equal(searchTermFor(computed!, "3"), "unread");
+  const sum = findValueInRequests(requests, candidatesOf({ text: "100 ₽", attributes: [] })).find((match) => match.kind === "computed");
+  assert.deepEqual(sum?.detail?.computed, { op: "sum", field: "price" });
+});
+
+test("a table row is matched to the array item holding several of its texts", () => {
+  const items = [
+    { id: 7, author: { name: "Иван Петров" }, comments: 482, date: "2026-11-18" },
+    { id: 8, author: { name: "Анна Смирнова" }, comments: 12, date: "2026-11-17" },
+  ];
+  const requests = [responseOf("rows", 1, { items })];
+  const element = { text: "Иван Петров 18.11.2026 482 комментария", attributes: [], parts: ["Иван Петров", "18.11.2026", "482 комментария"] };
+  const found = findValueInRequests(requests, candidatesOf(element), { parts: partsOf(element) });
+  assert.equal(found[0].kind, "row");
+  assert.equal(found[0].path, "root.items.0");
+  assert.deepEqual(found[0].detail?.row, { matched: 3, total: 3 });
+  assert.equal(searchTermFor(found[0], element.text), "Иван Петров");
+  assert.ok(!found.some((match) => match.kind === "row" && match.path === "root.items.1"));
+  assert.deepEqual(partsOf({ parts: ["only one"] }), []);
+});
+
+test("headers, URL parameters, request bodies and stream messages are searched too", () => {
+  const request = {
+    id: "h", method: "POST", url: "https://api.test/list?limit=25&tag=a&tag=b", timestamp: 2, status: 200,
+    responseHeaders: { "x-total-count": "482", "content-type": "application/json" },
+    requestHeaders: { "content-type": "application/json" },
+    requestBody: JSON.stringify({ filter: { pageSize: 25 } }),
+    responseBody: { items: [] },
+  } as unknown as ApiRequest;
+  const sections = (text: string, requests: ApiRequest[]) =>
+    findValueInRequests(requests, candidatesOf({ text, attributes: [] })).map((match) => [match.section, match.path]);
+  assert.deepEqual(sections("482", [request]), [["headers", "root.x-total-count"]]);
+  // pageSize ranks first: a counter-like field name.
+  assert.deepEqual(sections("25", [request]), [["requestBody", "root.filter.pageSize"], ["query", "root.limit"]]);
+
+  const streams = streamRequests([
+    { id: "1", protocol: "WebSocket", direction: "received", url: "wss://api.test/ws", data: '{"unread":7}', timestamp: 5 },
+    { id: "2", protocol: "WebSocket", direction: "received", url: "wss://api.test/ws", data: "AAEC", timestamp: 6, binary: true, size: 3 },
+  ]);
+  assert.equal(streams.length, 1);
+  assert.equal(streams[0].method, "WS ↓");
+  assert.deepEqual(sections("7", [request, ...streams]), [["stream", "root.unread"]]);
+});
+
+test("a change of a watched element is explained by the requests finished just before it", () => {
+  const at = 10_000;
+  const request = (id: string, timestamp: number, responseBody: unknown) =>
+    ({ id, method: "GET", url: `https://api.test/${id}`, timestamp, duration: 100, responseBody, status: 200 }) as unknown as ApiRequest;
+  const requests = [
+    request("before-start", 1_000, { unread: 481 }),
+    request("cause", 9_500, { unread: 481 }),
+    request("after", 12_000, { unread: 481 }),
+  ];
+  const change = explainChange(requests, { at, from: "482", to: "481" }, 5_000);
+  assert.equal(change.checked, 1);
+  assert.deepEqual(change.matches.map((match) => match.request.id), ["cause"]);
+
+  const computed = explainChange([request("other", 9_000, { total: 10 })], { at, from: "482", to: "481" }, 5_000);
+  assert.equal(computed.checked, 1);
+  assert.deepEqual(computed.matches, []);
 });

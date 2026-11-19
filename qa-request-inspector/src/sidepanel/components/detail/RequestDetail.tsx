@@ -15,9 +15,36 @@ import { useFieldUsage } from '../../hooks/useFieldUsage'
 import { t } from '../../locales'
 import { generateNegativeTests, negativeTestTargets, responseNegativeScenarios, type NegativeScenario } from '../../qa/negativeTesting'
 import type { OpenApiDocument } from '../../qa/contract/types'
+import type { MatchSection } from '../../utils/valueFinder'
 
 // The load tester is a separate tab that is rarely opened.
 const LoadTestPanel = lazyComponent(() => import('../loadtest/LoadTestPanel').then((module) => module.LoadTestPanel))
+
+/** A response field the element picker opened the request for. */
+export interface FocusField {
+  requestId: string
+  path: string
+  /** Containers to open so the field is visible. */
+  ancestors: string[]
+  /** Put into the response search. */
+  search: string
+  /** Opened from the list of matches: closing the request returns to it. */
+  fromList: boolean
+  /** Which part of the request holds the value: decides the tab that opens. */
+  section: MatchSection
+  /** The matched value (for "Substitute value"). */
+  value?: unknown
+  /** The value as the page shows it. */
+  pageValue?: string
+}
+
+/** Values to put into the response instead of the real one: the usual edge cases of a counter. */
+const PATCH_PRESETS = ['0', '-1', '1000000', 'null', '""', '"abc"', '[]']
+
+/** The tab where a section of the request is shown. */
+const TAB_OF_SECTION: Record<MatchSection, string> = {
+  response: 'response', stream: 'response', headers: 'headers', query: 'request', requestBody: 'request',
+}
 
 interface RequestDetailProps {
   request: ApiRequest
@@ -31,6 +58,14 @@ interface RequestDetailProps {
   onAddToCollection?: (collectionId: string, request: ApiRequest) => void
   onCreateNegativeMock?: (scenario: NegativeScenario) => void
   contractDocument?: OpenApiDocument | null
+  /** Response field to show: the element picker opened the request for it. */
+  focusField?: FocusField | null
+  /** Back to every match of the picked element. */
+  onShowAllMatches?: () => void
+  /** Bug report draft: the page value next to the field it was found in. */
+  onReportMismatch?: () => void
+  /** Start watching the picked element for changes. */
+  onWatch?: () => void
 }
 
 export function RequestDetail({
@@ -45,6 +80,10 @@ export function RequestDetail({
   onAddToCollection,
   onCreateNegativeMock,
   contractDocument,
+  focusField,
+  onShowAllMatches,
+  onReportMismatch,
+  onWatch,
 }: RequestDetailProps) {
   const [activeTab, setActiveTab] = useState('response')
   const [replaying, setReplaying] = useState(false)
@@ -94,6 +133,57 @@ export function RequestDetail({
     }
     setActiveTab('edit')
   }
+
+  // Opened by the element picker: show the part of the request holding the value, with the value
+  // in the search field of that tree.
+  useEffect(() => {
+    if (!focusField) return
+    setActiveTab(TAB_OF_SECTION[focusField.section])
+    if (focusField.section === 'requestBody') {
+      setRequestBodyRaw(false)
+      setRequestSearchQuery(focusField.search)
+    } else if (focusField.section === 'response' || focusField.section === 'stream') {
+      setResponseSearchQuery(focusField.search)
+    }
+  }, [focusField])
+
+  const [showPatchMenu, setShowPatchMenu] = useState(false)
+  const queryParams = useMemo(() => {
+    try {
+      return [...new URL(request.url).searchParams.entries()]
+    } catch {
+      return []
+    }
+  }, [request.url])
+  // Header and URL parameter rows have no tree: the matching row is found by its name.
+  const focusName = focusField && (focusField.section === 'headers' || focusField.section === 'query')
+    ? focusField.path.replace(/^root\./, '').replace(/\.\d+$/, '')
+    : null
+
+  /** A "patch" rule that puts `value` (JSON text) into the matched field of this response. */
+  const createValuePatch = (value: string) => {
+    if (!focusField) return
+    const field = focusField.path.replace(/^root\.?/, '')
+    const rule: MockRule = {
+      id: crypto.randomUUID(),
+      urlPattern: request.url,
+      method: (request.method as MockRule['method']) || 'ALL',
+      mode: 'patch',
+      patches: [{ path: field, value }],
+      status: request.status || 200,
+      statusText: request.statusText || 'OK',
+      responseBody: '',
+      responseHeaders: {},
+      enabled: true,
+      description: t().valuePatchDescription(field, focusField.pageValue ?? '', value),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    setShowPatchMenu(false)
+    onCreateMock?.(rule)
+  }
+  const canPatch = !!focusField && focusField.section === 'response' && focusField.path !== 'root'
+    && (focusField.value === null || typeof focusField.value !== 'object' || Array.isArray(focusField.value))
 
   // Field usage tracking for JSON tree
   const fieldUsage = useFieldUsage(request.responseBody)
@@ -450,6 +540,52 @@ export function RequestDetail({
           </TabButton>
         </Tabs.List>
 
+        {focusField && (
+          <div className="mx-3 mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-accent/40 bg-accent-light px-2.5 py-1.5 text-[11px] shrink-0">
+            <span className="min-w-0">
+              {t().valueFinderFoundAt}{' '}
+              <span className="text-text-muted">{t().valueFinderSections[focusField.section]}:</span>{' '}
+              <span className="font-mono break-all">{focusField.path === 'root' ? t().valueFinderWholeBody : focusField.path.replace(/^root\./, '')}</span>
+            </span>
+            <span className="ml-auto flex flex-wrap items-center gap-3">
+              {canPatch && onCreateMock && (
+                <span className="relative">
+                  <button onClick={() => setShowPatchMenu((open) => !open)} className="text-accent hover:underline" title={t().valuePatchHint}>
+                    {t().valuePatchButton}
+                  </button>
+                  {showPatchMenu && (
+                    <span className="absolute right-0 top-full mt-1 z-50 flex flex-col min-w-[160px] rounded-lg border border-border bg-surface py-1 shadow-lg">
+                      {[JSON.stringify(focusField.value ?? null), ...PATCH_PRESETS]
+                        .filter((value, index, list) => list.indexOf(value) === index)
+                        .filter((value) => value !== '[]' || Array.isArray(focusField.value))
+                        .map((value, index) => (
+                          <button key={value} onClick={() => createValuePatch(value)} className="px-3 py-1 text-left font-mono text-[11px] hover:bg-hover">
+                            {value}{index === 0 && <span className="ml-1 font-sans text-text-muted">{t().valuePatchCurrent}</span>}
+                          </button>
+                        ))}
+                    </span>
+                  )}
+                </span>
+              )}
+              {onWatch && (
+                <button onClick={onWatch} className="text-accent hover:underline" title={t().watchHint}>
+                  {t().watchButton}
+                </button>
+              )}
+              {onReportMismatch && (
+                    <button onClick={onReportMismatch} className="text-accent hover:underline" title={t().valueBugHint}>
+                      {t().valueBugButton}
+                    </button>
+                  )}
+              {onShowAllMatches && (
+                <button onClick={onShowAllMatches} className="text-accent hover:underline">
+                  {t().valueFinderAllMatches}
+                </button>
+              )}
+            </span>
+          </div>
+        )}
+
         <div className="flex-1 overflow-auto min-h-0">
           <Tabs.Panel value="response" className="p-3 h-full">
             {request.responseBody ? (
@@ -462,6 +598,7 @@ export function RequestDetail({
                 progress={fieldUsage.progress}
                 searchQuery={responseSearchQuery}
                 onSearchChange={setResponseSearchQuery}
+                focus={focusField && (focusField.section === 'response' || focusField.section === 'stream') ? focusField : null}
               />
             ) : (
               <div className="text-xs text-text-muted italic">{t().emptyResponse}</div>
@@ -469,6 +606,21 @@ export function RequestDetail({
           </Tabs.Panel>
 
           <Tabs.Panel value="request" className="p-3 h-full overflow-auto">
+            {queryParams.length > 0 && (
+              <div className="mb-3">
+                <div className="text-xs font-medium mb-1">{t().queryParams}</div>
+                <div className="space-y-0.5">
+                  {queryParams.map(([name, value], index) => (
+                    <div
+                      key={`${name}:${index}`}
+                      className={`text-xs font-mono rounded px-1 ${focusField?.section === 'query' && name === focusName ? 'ring-2 ring-accent bg-accent-light' : ''}`}
+                    >
+                      <span className="text-accent">{name}</span> = <span className="text-text-muted break-all">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {requestTree && (
               <div className="mb-2 flex items-center gap-1" role="group" aria-label={t().bodyViewLabel}>
                 <button type="button" onClick={() => setRequestBodyRaw(false)} aria-pressed={!requestBodyRaw}
@@ -487,6 +639,7 @@ export function RequestDetail({
                 searchQuery={requestSearchQuery}
                 onSearchChange={setRequestSearchQuery}
                 searchPlaceholder={t().searchInRequestBody}
+                focus={focusField?.section === 'requestBody' ? focusField : null}
               />
             ) : (
               <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-bg p-3 rounded-lg border border-border">
@@ -528,7 +681,10 @@ export function RequestDetail({
               <Collapsible.Panel>
                 <div className="space-y-1">
                   {Object.entries(request.responseHeaders).map(([key, value]) => (
-                    <div key={key} className="text-xs font-mono">
+                    <div
+                      key={key}
+                      className={`text-xs font-mono rounded px-1 ${focusField?.section === 'headers' && key === focusName ? 'ring-2 ring-accent bg-accent-light' : ''}`}
+                    >
                       <span className="text-accent">{key}:</span>{' '}
                       <span className="text-text-muted">{value}</span>
                     </div>

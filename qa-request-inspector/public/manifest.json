@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_appName__",
   "default_locale": "ru",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "__MSG_appDesc__",
   "permissions": [
     "sidePanel",
@@ -18,6 +18,14 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "commands": {
+    "pick-element": {
+      "suggested_key": {
+        "default": "Alt+Shift+F"
+      },
+      "description": "__MSG_pickElementCommand__"
+    }
+  },
   "side_panel": {
     "default_path": "sidepanel.html"
   },

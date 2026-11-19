@@ -58,7 +58,7 @@ function createChrome(shared) {
   const chrome = {
     commands,
     badges,
-    sidePanel: { setPanelBehavior: () => {} },
+    sidePanel: { setPanelBehavior: () => {}, opened: [], open: async (options) => { chrome.sidePanel.opened.push(options); } },
     scripting: { executeScript: async () => {} },
     alarms: { create: () => {}, onAlarm: event() },
     action: {
@@ -117,6 +117,8 @@ function createChrome(shared) {
       },
     },
   };
+  // `commands` above records debugger commands; the keyboard shortcut event lives on it too.
+  commands.onCommand = event();
   return chrome;
 }
 
@@ -669,4 +671,16 @@ test('pinned sessions survive the cleanup', async () => {
   assert.deepEqual(shared.local.sessions.map((session) => session.id), ['reference']);
   assert.ok('session_reference' in shared.local);
   assert.ok(!('session_old' in shared.local));
+});
+
+test('the picker shortcut reaches the panel of its window and opens a panel where there is none', async () => {
+  const shared = createShared();
+  const chrome = await startWorker(shared);
+  const first = await openPanel(chrome, 1);
+  chrome.commands.onCommand.fire('pick-element', { id: 11, windowId: 1 });
+  chrome.commands.onCommand.fire('other-command', { id: 11, windowId: 1 });
+  assert.equal(first.ofType('PICK_ELEMENT_COMMAND').length, 1);
+  chrome.commands.onCommand.fire('pick-element', { id: 21, windowId: 2 });
+  assert.deepEqual(chrome.sidePanel.opened, [{ windowId: 2 }]);
+  assert.equal(first.ofType('PICK_ELEMENT_COMMAND').length, 1);
 });

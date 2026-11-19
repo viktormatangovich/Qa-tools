@@ -7,5 +7,8 @@
   },
   "openTitle": {
     "message": "Open QA Tools"
+  },
+  "pickElementCommand": {
+    "message": "Pick a page element and find its value in requests"
   }
 }

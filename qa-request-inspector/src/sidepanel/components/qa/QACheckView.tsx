@@ -7,6 +7,7 @@ import { bundleExternalRefs, hasExternalRefs, loadOpenApiSpecFromUrl, parseOpenA
 import { t } from "../../locales";
 import { contractTestSuggestions } from "../../qa/contract/suggestions";
 import { diffOpenApi } from "../../qa/contract/contractDiff";
+import type { ContractCoverage } from "../../qa/contract/types";
 
 type QAFilter = "all" | QAIssueSeverity | QAIssueCategory;
 
@@ -20,7 +21,7 @@ interface QACheckViewProps {
   domChecksLoading: boolean;
   contractSpecText: string;
   contractError: string | null;
-  contractCoverage: { total: number; exercised: number; validated: number; passed: number; failed: number } | null;
+  contractCoverage: ContractCoverage | null;
   onContractSpecChange: (text: string) => void;
   onCreateBugReport: (issue: QAIssue) => void;
   onDismissIssue: (issue: QAIssue) => void;
@@ -142,6 +143,7 @@ export function QACheckView({ issues, filter, onFilterChange, onOpenRequest, onH
       {refsNote && <p role="status" className="mt-1 text-[10px] text-[var(--color-text-muted)]">{refsNote}</p>}
       {refWarnings.length > 0 && <ul className="mt-1 list-disc pl-4 text-[10px] text-amber-700">{refWarnings.map((warning) => <li className="break-all" key={warning}>{warning}</li>)}</ul>}
       {contractCoverage && <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">{t().contractCoverageLine(contractCoverage)}</p>}
+      {contractCoverage && contractCoverage.validated === 0 && <p className="mt-1 text-[10px] text-amber-700">{contractCoverage.captured === 0 ? t().contractNoRequests : t().contractNoMatches(contractCoverage.captured, contractCoverage.unmatched)}</p>}
       {suggestions.length > 0 && <details className="mt-2 text-[10px]"><summary>{t().deterministicValues}</summary><pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap">{suggestions.join("\n")}</pre></details>}
       <details className="mt-2 text-[10px]"><summary>{t().contractDiffTitle}</summary><textarea value={comparisonSpec} onChange={(event) => setComparisonSpec(event.target.value)} placeholder={t().contractDiffPlaceholder} className="mt-1 h-16 w-full rounded border border-border bg-bg p-1 font-mono" />{diff.length > 0 && <ul className="mt-1 list-disc pl-4">{diff.map((entry, index) => <li key={`${entry.message}:${index}`}>[{entry.severity === "breaking" ? t().breakingChange : t().compatibleChange}] {entry.message}</li>)}</ul>}</details>
     </details>

@@ -1,4 +1,5 @@
 import type { ru } from "./ru";
+import type { ContractCoverage } from "../qa/contract/types";
 
 // English interface. The shape is checked against the Russian file, so a missing key is a type error.
 export const en: typeof ru = {
@@ -635,7 +636,9 @@ export const en: typeof ru = {
   loadingEllipsis: "Loading…",
   loadUrl: "Load URL",
   loadSpecFile: "Load a JSON/YAML file",
-  contractCoverageLine: (c: { total: number; exercised: number; validated: number; passed: number; failed: number }) =>
+  contractNoRequests: "No captured requests yet: open the page under test and trigger the actions that call the API.",
+  contractNoMatches: (captured: number, examples: string[]) => `None of ${captured} captured requests matches a path of the specification${examples.length ? `, e.g. ${examples.join(", ")}` : ""}. Make sure the specification describes these addresses.`,
+  contractCoverageLine: (c: Omit<ContractCoverage, "captured" | "unmatched">) =>
     `API contract coverage: ${c.exercised}/${c.total} operations · validated ${c.validated} · passed ${c.passed} · failed ${c.failed}`,
   deterministicValues: "Deterministic test values",
   contractDiffTitle: "Contract comparison (current → compared)",
@@ -744,4 +747,67 @@ export const en: typeof ru = {
   teamTextCopied: "Text copied.",
   teamCopyFailed: "Could not copy the text.",
   teamDownloadText: "Download text",
+
+  // Element picker → value in responses
+  pickElement: "Find a page element in requests: click a counter, a date or a table row (Alt+Shift+F)",
+  pickElementActive: "Click an element on the page (Esc to cancel)",
+  pickElementFailed: (message: string) => `Cannot pick an element on this page: ${message}`,
+  valueFinderTitle: "Page value in requests",
+  valueFinderValue: "Value to find, from",
+  valueFinderPickAgain: "Pick another",
+  valueFinderAlsoAttributes: "Attributes searched too:",
+  valueFinderChecked: (n: number) => `Responses with a body checked: ${n}`,
+  valueFinderFound: (n: number) => `${n} ${n === 1 ? "match" : "matches"}`,
+  valueFinderLimited: (n: number) => `first ${n} shown`,
+  valueFinderNoMatches: "The value is not in the captured responses. The page may compute it itself (a sum, the length of a filtered list), or the request came before the panel was opened: reload the page and pick the element again. You can also correct the value in the field above.",
+  valueFinderWholeBody: "(whole body)",
+  valueFinderFoundAt: "Page value is in the field",
+  valueFinderAllMatches: "All matches",
+  valueFinderFromAttribute: (name: string) => `from ${name}`,
+  valueFinderKinds: {
+    exact: "exact", number: "number", converted: "other unit", date: "date", row: "row",
+    approx: "≈ rounded", length: "array length", computed: "computed", contains: "in text",
+  },
+  valueFinderNotes: {
+    percent: "share: 45% is stored as 0.45",
+    cents: "in cents",
+    seconds: "in seconds",
+    milliseconds: "in milliseconds",
+    minutes: "in minutes",
+  },
+  valueFinderRow: (matched: number, total: number) => `row texts matched: ${matched} of ${total}`,
+  valueFinderComputedCount: (formula: string) => `the page may compute: ${formula}`,
+  valueFinderComputedSum: (formula: string) => `the page may compute: ${formula}`,
+  valueFinderInFrame: (url: string) => `Element inside an iframe: ${url}`,
+  valueFinderParts: "Row texts:",
+  pickElementShortcutHint: "Shortcut of the element picker; change it at chrome://extensions/shortcuts",
+  pickHoverMatches: (n: number) => (n === 0 ? "not in responses" : `${n} ${n === 1 ? "match" : "matches"}`),
+  valueFinderSections: {
+    response: "response", headers: "response header", query: "URL parameter", requestBody: "request body", stream: "stream message",
+  },
+  queryParams: "URL parameters",
+  valuePatchButton: "Substitute",
+  valuePatchHint: "Create a \"patch\" rule: put another value into this field and see how the page shows it (after a reload or repeating the action)",
+  valuePatchCurrent: "current",
+  valuePatchDescription: (field: string, pageValue: string, value: string) => `Substitute ${field} = ${value} (the page showed "${pageValue}")`,
+  watchButton: "Watch",
+  watchHint: "Watch the element: on every change of its text show which request brought the new value",
+  watchActive: (text: string, changes: number) => `Watching "${text}" · ${changes} ${changes === 1 ? "change" : "changes"}`,
+  watchStop: "Stop",
+  watchWaiting: "Do something on the page: changes appear here.",
+  watchNotFromRequests: (checked: number) =>
+    checked === 0
+      ? "no requests before the change: the page computed the value"
+      : `none of the ${checked} requests before the change has this value: probably computed by the page`,
+  watchFailed: "Cannot start watching: the picked element is no longer on the page. Pick it again.",
+  valueBugButton: "Bug report",
+  valueBugHint: "Bug report draft: the page value and the response field, with a screenshot",
+  valueBugTitle: (pageValue: string, field: string) => `Value "${pageValue}" on the page does not match field ${field}`,
+  valueBugDescription: (info: { pageValue: string; selector: string; frameUrl?: string; request: string; field: string; responseValue: string }) =>
+    [
+      `On the page: "${info.pageValue}" (${info.selector}${info.frameUrl ? `, iframe ${info.frameUrl}` : ""})`,
+      `In the response: ${info.request}`,
+      `Field: ${info.field} = ${info.responseValue}`,
+      "Expected: <describe the value the page should show>",
+    ].join("\n"),
 };
