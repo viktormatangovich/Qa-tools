@@ -1,6 +1,6 @@
 # Reqpane Privacy Policy
 
-Last updated: November 10, 2026
+Last updated: November 19, 2026
 
 Reqpane is a browser extension for developers and QA engineers to debug API calls.
 
@@ -8,7 +8,7 @@ Reqpane is a browser extension for developers and QA engineers to debug API call
 
 The extension developer does **NOT** collect, receive or store any of your data. There are no servers of ours: captured network data is processed in your browser.
 
-Data leaves your browser only in the cases listed under [Connections Made at Your Request](#connections-made-at-your-request), each of which you start yourself.
+Data leaves your browser only in the cases listed under [Connections Made at Your Request](#connections-made-at-your-request), each of which you start yourself. The only automatic connection is the [version check](#version-check), which carries no data about you or the capture and can be switched off.
 
 ## Local Storage
 
@@ -23,6 +23,8 @@ The extension stores the following data locally on your device:
 - **Saved sessions** - Request history you explicitly save. Ordinary sessions are removed after 24 hours (three newest are kept); a session you pin as a reference stays until you delete it
 - **Load test history** - Results from load tests you run
 - **Favorites, collections and tags** - Requests you mark or group
+- **Request notes** - Comments you attach to requests. They are saved with a session and included in exported HAR files and reports
+- **Watched endpoints** - Method and path of the endpoints the watchdog watches, with their slow-answer thresholds
 - **QA settings and OpenAPI specifications** - Analyzer thresholds and specifications you explicitly paste or load, together with external documents downloaded for them
 - **Team tools workspace** - Project profiles, business rules, manual and recorded reproduction steps
 - **Jira connection** - The address, project key, issue type, account e-mail and API token you enter. **The token is stored unencrypted** in the extension's local storage on this device. It is never included in the settings export
@@ -56,6 +58,14 @@ The extension has no servers of its own. It makes network requests only when you
 - **Loading an OpenAPI specification by URL** and the external documents it references (`$ref`) - plain downloads from the addresses in the specification
 - **Network interception** - Capturing, mocking, pausing, patching, delaying, blocking and throttling the requests of the page you inspect
 
+## Version Check
+
+Once a day, while the side panel is open, the extension asks GitHub for the number of the latest published version: a plain GET request without cookies to `api.github.com` (latest release of the public repository) and, if there is no release, to `raw.githubusercontent.com` (the manifest of the main branch). Nothing about you, your pages or the captured requests is sent; like any web request it reveals your IP address to GitHub. The answer — a version number — is stored locally. Switch it off in the settings: "Tell me about a new version".
+
+## Notifications
+
+When an endpoint you asked the watchdog to watch returns an error or answers slower than your threshold, the extension shows a Chrome notification with the method, path and status. Notifications are created locally and only for endpoints you chose.
+
 ## Page Scripts
 
 The extension's page helper is not present on pages by default. It is injected into the inspected tab only when you use DOM field search, element highlight, page checks or step recording. The full accessibility audit additionally injects the open-source [axe-core](https://github.com/dequelabs/axe-core) library for the duration of the check; it runs locally and sends nothing anywhere.
@@ -73,6 +83,7 @@ The extension requires certain browser permissions to function:
 | `unlimitedStorage` | Let saved sessions with large response bodies exceed the default 10 MB local storage quota |
 | `debugger` | Chrome DevTools Protocol access: capture requests with their real headers and timing, intercept and modify them, emulate network conditions, take a screenshot of the tab |
 | `alarms` | Minute timer that removes expired saved sessions |
+| `notifications` | Watchdog alerts for the endpoints you chose to watch |
 | `scripting` | Inject the page helper (and axe-core) into the current tab when you use DOM field search, element highlight, page checks or step recording |
 | `clipboardWrite` | Copy request data to clipboard |
 | `<all_urls>` | Capture requests from, and run the page features above on, any website you choose to inspect; send an issue to the Jira address you configured; download an OpenAPI specification from the address you entered |
@@ -92,6 +103,7 @@ You have full control over your data:
 - Delete load test history
 - Clear recorded steps in the team tools
 - Remove the Jira token in the settings
+- Switch off the version check and remove watched endpoints in the settings
 - Uninstalling the extension removes all stored data
 
 ## Changes to This Policy

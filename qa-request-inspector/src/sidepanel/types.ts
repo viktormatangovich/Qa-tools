@@ -51,6 +51,8 @@ export interface ApiRequest {
   remoteAddress?: string;
   fromCache?: boolean;
   graphql?: GraphQLInfo;
+  /** QA note attached to the request (RequestMeta.notes, copied in for exports and saved sessions). */
+  note?: string;
 }
 
 export type RuleMode = "mock" | "patch" | "delay" | "block";

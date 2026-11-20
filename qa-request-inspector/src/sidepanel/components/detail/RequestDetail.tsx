@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Tabs } from '@base-ui-components/react/tabs'
 import { Collapsible } from '@base-ui-components/react/collapsible'
-import { Terminal, X, ChevronDown, Code, Braces, Play, Loader2, Plus, Trash2, Send, Activity, Shield, Bookmark } from 'lucide-react'
+import { Terminal, X, ChevronDown, Code, Braces, Play, Loader2, Plus, Trash2, Send, Activity, Shield, Bookmark, BellRing, NotebookPen, FileCode } from 'lucide-react'
 import type { ApiRequest, MockRule, RequestCollection } from '../../types'
 import { TabButton } from '../common/TabButton'
 import { CodeCopyBlock } from '../common/CodeCopyBlock'
@@ -11,6 +11,9 @@ import { JsonTreeView } from '../json/JsonTreeView'
 import { TimingBreakdown } from './TimingBreakdown'
 import { lazyComponent } from '../lazy'
 import { generateCurl, generateFetchCode, generateTypeScript } from '../../utils/generators'
+import { generatePowerShell, generatePython } from '../../utils/snippets'
+import { JwtInspector } from './JwtInspector'
+import { EndpointHistoryView } from './EndpointHistoryView'
 import { useFieldUsage } from '../../hooks/useFieldUsage'
 import { t } from '../../locales'
 import { generateNegativeTests, negativeTestTargets, responseNegativeScenarios, type NegativeScenario } from '../../qa/negativeTesting'
@@ -66,6 +69,15 @@ interface RequestDetailProps {
   onReportMismatch?: () => void
   /** Start watching the picked element for changes. */
   onWatch?: () => void
+  /** QA note of the request and its setter (an empty text removes it). */
+  note?: string
+  onNoteChange?: (note: string) => void
+  /** The endpoint is watched by the watchdog; the button toggles it. */
+  watched?: boolean
+  onToggleWatch?: () => void
+  /** Every captured request, for the endpoint history tab. */
+  requests?: ApiRequest[]
+  onOpenRequest?: (request: ApiRequest) => void
 }
 
 export function RequestDetail({
@@ -84,8 +96,16 @@ export function RequestDetail({
   onShowAllMatches,
   onReportMismatch,
   onWatch,
+  note,
+  onNoteChange,
+  watched = false,
+  onToggleWatch,
+  requests = [],
+  onOpenRequest,
 }: RequestDetailProps) {
   const [activeTab, setActiveTab] = useState('response')
+  const [noteOpen, setNoteOpen] = useState(!!note)
+  useEffect(() => setNoteOpen(!!note), [request.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const [replaying, setReplaying] = useState(false)
   const [replayResult, setReplayResult] = useState<{ status: number; body: unknown; error?: string } | null>(null)
   const [showMockMenu, setShowMockMenu] = useState(false)
@@ -499,6 +519,26 @@ export function RequestDetail({
               </div>
             )}
           </div>
+          {onNoteChange && (
+            <button
+              onClick={() => setNoteOpen((open) => !open)}
+              className={`p-1.5 rounded transition-colors ${note ? "text-amber-600" : "text-text-muted hover:text-text hover:bg-hover"}`}
+              title={t().noteButton}
+              aria-pressed={noteOpen}
+            >
+              <NotebookPen className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {onToggleWatch && (
+            <button
+              onClick={onToggleWatch}
+              className={`p-1.5 rounded transition-colors ${watched ? "bg-amber-500 text-white" : "text-text-muted hover:text-text hover:bg-hover"}`}
+              title={watched ? t().watchdogUnwatch : t().watchdogWatch}
+              aria-pressed={watched}
+            >
+              <BellRing className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             onClick={onCopy}
             className={`px-2 py-1 text-xs rounded transition-colors ${
@@ -524,6 +564,21 @@ export function RequestDetail({
         <p className="text-xs font-mono break-all max-h-16 overflow-auto">{request.url}</p>
       </div>
 
+      {/* QA note: kept with the request, shown in the list and included in exports */}
+      {onNoteChange && noteOpen && (
+        <div className="px-4 py-2 border-b border-border shrink-0">
+          <textarea
+            value={note ?? ""}
+            onChange={(event) => onNoteChange(event.target.value)}
+            placeholder={t().notePlaceholder}
+            rows={2}
+            autoFocus={!note}
+            className="w-full resize-y rounded-lg border border-amber-300 bg-amber-50/60 dark:bg-amber-950/30 px-2 py-1.5 text-xs focus:outline-none focus:border-amber-500"
+          />
+          <p className="mt-0.5 text-[10px] text-text-muted">{t().noteHint}</p>
+        </div>
+      )}
+
       {/* Tabs */}
       <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <Tabs.List className="@container flex border-b border-border shrink-0 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]">
@@ -531,6 +586,7 @@ export function RequestDetail({
           <TabButton value="request" active={activeTab === 'request'}>{t().tabRequest}</TabButton>
           <TabButton value="headers" active={activeTab === 'headers'}>{t().tabHeaders}</TabButton>
           <TabButton value="timing" active={activeTab === 'timing'}>{t().timingTab}</TabButton>
+          <TabButton value="history" active={activeTab === 'history'}>{t().historyTab}</TabButton>
           <TabButton value="edit" active={activeTab === 'edit'}>{t().tabEdit}</TabButton>
           <TabButton value="negative" active={activeTab === 'negative'}>{t().tabNegative}</TabButton>
           <TabButton value="code" active={activeTab === 'code'}>{t().tabCode}</TabButton>
@@ -652,7 +708,12 @@ export function RequestDetail({
             <TimingBreakdown request={request} />
           </Tabs.Panel>
 
+          <Tabs.Panel value="history" className="p-3">
+            <EndpointHistoryView request={request} requests={requests.length ? requests : [request]} onOpenRequest={onOpenRequest} />
+          </Tabs.Panel>
+
           <Tabs.Panel value="headers" className="p-3">
+            <JwtInspector request={request} />
             <Collapsible.Root defaultOpen>
               <Collapsible.Trigger className="flex items-center gap-1 text-xs font-medium mb-2">
                 <ChevronDown className="w-3 h-3" />
@@ -878,6 +939,16 @@ export function RequestDetail({
                 label="TypeScript"
                 icon={<Braces className="w-4 h-4" />}
                 code={generateTypeScript(request)}
+              />
+              <CodeCopyBlock
+                label="PowerShell"
+                icon={<Terminal className="w-4 h-4" />}
+                code={generatePowerShell(request)}
+              />
+              <CodeCopyBlock
+                label="Python (requests)"
+                icon={<FileCode className="w-4 h-4" />}
+                code={generatePython(request)}
               />
             </div>
           </Tabs.Panel>

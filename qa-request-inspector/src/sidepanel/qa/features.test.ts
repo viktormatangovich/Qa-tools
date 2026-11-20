@@ -3,6 +3,9 @@ import test from "node:test";
 import { bundleExternalRefs, hasExternalRefs, matchEndpoint, parseOpenApiSpec, unsupportedContractFeatures, validateRequest, validateResponse } from "./contract/contractChecker.ts";
 import { buildIssuePayload, createJiraIssue, isJiraConfigured, jiraAuthHeader, jiraBaseUrl } from "./jira.ts";
 import { playwrightUiScenario, retainedSessions, stepText, type ManualStep, type StepWords } from "./teamTools.ts";
+import { setQaLanguage } from "./messages.ts";
+import { httpServerErrorRule } from "./rules/networkRules.ts";
+import { generateNegativeTests } from "./negativeTesting.ts";
 
 const base = { id: "r", type: "fetch" as const, method: "GET", url: "https://api.test/v1/pets/7", requestHeaders: {}, requestBody: null, responseHeaders: { "content-type": "application/json; charset=utf-8" }, responseBody: {}, status: 200, statusText: "OK", duration: 5, timestamp: 1, error: null, pageUrl: "", pageTitle: "" };
 const paths = (violations: Array<{ path: string }>) => violations.map((violation) => violation.path);
@@ -249,4 +252,28 @@ test("Jira errors are passed on; a failed attachment does not lose the issue", a
   const result = await createJiraIssue(jira, { summary: "x", description: "y", screenshotDataUrl: "data:image/png;base64,UE5H" }, flaky);
   assert.equal(result.key, "QA-8");
   assert.match(result.attachmentError || "", /HTTP 413/);
+});
+
+// ---- Output language -----------------------------------------------------------------------
+
+test("contract violations, rule titles and negative tests follow the selected language", () => {
+  const spec = specWith({ type: "object", properties: { id: { type: "integer" } }, required: ["id"] });
+  const request = { ...base, responseBody: { id: "x" } };
+  assert.equal(validateResponse(spec, request)[0]?.message, "Неожиданный тип значения.");
+  setQaLanguage("en");
+  try {
+    assert.equal(validateResponse(spec, request)[0]?.message, "Unexpected value type.");
+    assert.throws(() => parseOpenApiSpec("{}"), /Expected an OpenAPI document with paths/);
+    assert.equal(httpServerErrorRule.name, "HTTP server error");
+    const settings = { networkErrorsEnabled: true } as Parameters<typeof httpServerErrorRule.check>[0]["settings"];
+    const [issue] = httpServerErrorRule.check({ requests: [{ ...base, status: 503, statusText: "" }], consoleErrors: [], domFindings: [], settings });
+    assert.equal(issue?.title, "HTTP 503 server error");
+    assert.equal(issue?.description, "GET: server error.");
+    const tests = generateNegativeTests({ ...base, method: "POST", requestBody: '{"name":"Rex"}' });
+    assert.equal(tests[0]?.target, "Request body · name");
+    assert.ok(tests.some((item) => item.title === "Empty string"));
+  } finally {
+    setQaLanguage("ru");
+  }
+  assert.equal(httpServerErrorRule.name, "Ошибка HTTP сервера");
 });

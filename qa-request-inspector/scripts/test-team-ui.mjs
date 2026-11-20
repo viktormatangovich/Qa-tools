@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const report = [];
-const chromiumPath = process.env.QA_CHROMIUM_PATH || 'C:/Users/Виктор/AppData/Local/ms-playwright/chromium-1200/chrome-win64/chrome.exe';
+// Playwright's own Chromium unless QA_CHROMIUM_PATH points to another build (npx playwright install chromium).
+const chromiumPath = process.env.QA_CHROMIUM_PATH || undefined;
 let hits = 0;
 const server = http.createServer((req, res) => {
   if (req.url === '/data') { res.setHeader('Content-Type','application/json'); res.end(JSON.stringify({ total: 3, items: [{price:1},{price:2}] })); }
@@ -17,7 +18,7 @@ server.on('upgrade',(req,socket)=>{const key=crypto.createHash('sha1').update(re
 await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 const profileDirectory = await fs.mkdtemp(path.join(root,'.qa-browser-profile-'));
-let context = await chromium.launchPersistentContext(profileDirectory, { headless:true, ignoreDefaultArgs:['--disable-extensions'], executablePath:chromiumPath, args:[`--disable-extensions-except=${path.join(root,'dist')}`,`--load-extension=${path.join(root,'dist')}`], viewport:{width:360,height:900} });
+let context = await chromium.launchPersistentContext(profileDirectory, { headless:true, ...(chromiumPath ? {} : { channel:'chromium' }), ignoreDefaultArgs:['--disable-extensions'], executablePath:chromiumPath, args:[`--disable-extensions-except=${path.join(root,'dist')}`,`--load-extension=${path.join(root,'dist')}`], viewport:{width:360,height:900} });
 try {
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout:15000 });
   const id = worker.url().split('/')[2];

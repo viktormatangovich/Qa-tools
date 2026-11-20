@@ -9,6 +9,8 @@ import type { ApiRequest } from "../types.ts";
 import { hexDump } from "./hex.ts";
 import { candidatesOf, findValueInRequests, parseDisplayedValue, partsOf, searchTermFor, streamRequests, explainChange } from "./valueFinder.ts";
 import { buildSettingsFile, readSettingsFile } from "./settingsTransfer.ts";
+import { generateHar, generateMarkdownReport } from "./generators.ts";
+import { setQaLanguage } from "../qa/messages.ts";
 
 // ---- GraphQL ----------------------------------------------------------------------------------
 
@@ -390,4 +392,30 @@ test("a change of a watched element is explained by the requests finished just b
   const computed = explainChange([request("other", 9_000, { total: 10 })], { at, from: "482", to: "481" }, 5_000);
   assert.equal(computed.checked, 1);
   assert.deepEqual(computed.matches, []);
+});
+
+test("a QA note survives a HAR export and import", () => {
+  const request: ApiRequest = { id: "n1", type: "fetch", method: "GET", url: "https://example.test/api/items", requestHeaders: {}, requestBody: null, responseHeaders: {}, responseBody: null, status: 200, statusText: "OK", duration: 5, timestamp: 1000, error: null, pageUrl: "", pageTitle: "", note: "Empty list for a new user" };
+  const har = generateHar([request, { ...request, id: "n2", note: undefined }]);
+  assert.equal(har.log.entries[0].comment, "Empty list for a new user");
+  assert.equal("comment" in har.log.entries[1], false);
+  const [first, second] = parseHar(JSON.stringify(har)).sort((a, b) => (a.note ? -1 : b.note ? 1 : 0));
+  assert.equal(first.note, "Empty list for a new user");
+  assert.equal(second.note, undefined);
+});
+
+test("the Markdown report shows notes and follows the selected language", () => {
+  const request: ApiRequest = { id: "m1", type: "fetch", method: "GET", url: "https://example.test/api/items", requestHeaders: {}, requestBody: null, responseHeaders: {}, responseBody: null, status: 404, statusText: "Not Found", duration: 5, timestamp: 1000, error: null, pageUrl: "", pageTitle: "", note: "Should be 200" };
+  const ru = generateMarkdownReport([request], [], { url: "", title: "" });
+  assert.match(ru, /^# Отчёт по API/);
+  assert.ok(ru.includes("- **Заметка:** Should be 200"));
+  setQaLanguage("en");
+  try {
+    const en = generateMarkdownReport([request], [], { url: "", title: "" });
+    assert.match(en, /^# API report/);
+    assert.ok(en.includes("## Failed requests (1)"));
+    assert.ok(en.includes("- **Note:** Should be 200"));
+  } finally {
+    setQaLanguage("ru");
+  }
 });

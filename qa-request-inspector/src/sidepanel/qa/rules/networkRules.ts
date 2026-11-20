@@ -1,6 +1,7 @@
 import type { ApiRequest } from "../../types";
 import type { QAAnalysisInput } from "../core/rulesEngine";
 import type { QAIssue, QARule } from "../core/types";
+import { qt } from "../messages.ts";
 
 function requestIssue(
   ruleId: string,
@@ -29,60 +30,60 @@ function requestIssue(
 
 export const httpClientErrorRule: QARule<QAAnalysisInput> = {
   id: "network.http-client-error",
-  name: "Ошибка HTTP клиента",
+  get name() { return qt().ruleClientError; },
   category: "network",
   check: ({ requests, settings }) => !settings.networkErrorsEnabled ? [] : requests
     .filter((request) => request.status >= 400 && request.status < 500)
     .map((request) => requestIssue(
       "network.http-client-error",
       "error",
-      `Ошибка HTTP ${request.status} на стороне клиента`,
-      `${request.method}: ${request.statusText || "ошибка клиента"}.`,
+      qt().clientErrorTitle(request.status),
+      `${request.method}: ${request.statusText || qt().clientErrorFallback}.`,
       request,
     )),
 };
 
 export const httpServerErrorRule: QARule<QAAnalysisInput> = {
   id: "network.http-server-error",
-  name: "Ошибка HTTP сервера",
+  get name() { return qt().ruleServerError; },
   category: "network",
   check: ({ requests, settings }) => !settings.networkErrorsEnabled ? [] : requests
     .filter((request) => request.status >= 500 && request.status < 600)
     .map((request) => requestIssue(
       "network.http-server-error",
       "critical",
-      `Ошибка HTTP ${request.status} на стороне сервера`,
-      `${request.method}: ${request.statusText || "ошибка сервера"}.`,
+      qt().serverErrorTitle(request.status),
+      `${request.method}: ${request.statusText || qt().serverErrorFallback}.`,
       request,
     )),
 };
 
 export const slowRequestRule: QARule<QAAnalysisInput> = {
   id: "network.slow-request",
-  name: "Медленный запрос",
+  get name() { return qt().slowRequest; },
   category: "performance",
   check: ({ requests, settings }) => !settings.slowRequestsEnabled ? [] : requests
     .filter((request) => request.duration > settings.slowRequestThresholdMs)
     .map((request) => requestIssue(
       "network.slow-request",
       "warning",
-      "Медленный запрос",
-      `${request.method} выполнялся ${request.duration} мс (порог: ${settings.slowRequestThresholdMs} мс).`,
+      qt().slowRequest,
+      qt().slowRequestDescription(request.method, request.duration, settings.slowRequestThresholdMs),
       request,
     )),
 };
 
 export const failedRequestRule: QARule<QAAnalysisInput> = {
   id: "network.failed-request",
-  name: "Неудавшийся запрос",
+  get name() { return qt().failedRequest; },
   category: "network",
   check: ({ requests, settings }) => !settings.networkErrorsEnabled ? [] : requests
     .filter((request) => Boolean(request.error))
     .map((request) => requestIssue(
       "network.failed-request",
       "error",
-      "Неудавшийся запрос",
-      request.error || "Запрос не завершился.",
+      qt().failedRequest,
+      request.error || qt().requestNotCompleted,
       request,
     )),
 };
@@ -103,7 +104,7 @@ function isIgnoredDuplicate(request: ApiRequest): boolean {
 
 export const duplicateRequestRule: QARule<QAAnalysisInput> = {
   id: "network.duplicate-request",
-  name: "Возможный дублирующийся запрос",
+  get name() { return qt().duplicateRequest; },
   category: "network",
   check: ({ requests, settings }) => {
     if (!settings.duplicateDetectionEnabled) return [];
@@ -127,8 +128,8 @@ export const duplicateRequestRule: QARule<QAAnalysisInput> = {
         ruleId: "network.duplicate-request",
         category: "network",
         severity: "warning",
-        title: "Возможный дублирующийся запрос",
-        description: `${representative.method} отправлен ${chronological.length} раз за ${interval} мс.`,
+        title: qt().duplicateRequest,
+        description: qt().duplicateDescription(representative.method, chronological.length, interval),
         timestamp: representative.timestamp,
         url: representative.url,
         requestId: representative.id,
@@ -145,10 +146,10 @@ function responseSize(responseBody: unknown): number {
 
 export const largeResponseRule: QARule<QAAnalysisInput> = {
   id: "network.large-response",
-  name: "Большой ответ",
+  get name() { return qt().largeResponse; },
   category: "performance",
   check: ({ requests, settings }) => !settings.largeResponsesEnabled ? [] : requests.flatMap((request) => {
     const size = responseSize(request.responseBody);
-    return size > settings.largeResponseThresholdBytes ? [requestIssue("network.large-response", "warning", "Большой ответ", `Размер ответа ${request.method}: ${size} байт (порог: ${settings.largeResponseThresholdBytes} байт).`, request)] : [];
+    return size > settings.largeResponseThresholdBytes ? [requestIssue("network.large-response", "warning", qt().largeResponse, qt().largeResponseDescription(request.method, size, settings.largeResponseThresholdBytes), request)] : [];
   }),
 };

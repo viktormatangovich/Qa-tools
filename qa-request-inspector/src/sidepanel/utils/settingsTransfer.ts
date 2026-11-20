@@ -17,6 +17,8 @@ export const SETTINGS_KEYS = [
   'teamWorkspace',
   'tags',
   'jiraSettings',
+  'checkUpdates',
+  'watchedEndpoints',
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -45,6 +47,8 @@ const SHAPES: Record<SettingsKey, Shape> = {
   teamWorkspace: 'object',
   tags: 'array',
   jiraSettings: 'object',
+  checkUpdates: 'boolean',
+  watchedEndpoints: 'array',
 };
 
 function hasShape(value: unknown, shape: Shape): boolean {

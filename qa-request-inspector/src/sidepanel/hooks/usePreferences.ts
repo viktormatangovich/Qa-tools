@@ -11,13 +11,16 @@ export function usePreferences() {
   // On by default: tokens, passwords and cookies do not leave the browser in exported files.
   const [maskSecretsOnExport, setMaskSecretsOnExport] = useState(true);
   // t() reads a module-level language; this state exists to re-render the panel when it changes.
+  // On by default: one request a day to GitHub for the latest version number (see PRIVACY.md).
+  const [checkUpdates, setCheckUpdates] = useState(true);
   const [language, setLanguage] = useState<Language>(getLanguage); // already read from storage in main.tsx
 
   useEffect(() => {
-    void loadStored(['darkMode', 'fontSize', 'maskSecretsOnExport', 'language']).then((stored) => {
+    void loadStored(['darkMode', 'fontSize', 'maskSecretsOnExport', 'language', 'checkUpdates']).then((stored) => {
       if (stored.darkMode !== undefined) setDarkMode(stored.darkMode);
       if (stored.fontSize) setFontSize(stored.fontSize);
       if (stored.maskSecretsOnExport !== undefined) setMaskSecretsOnExport(stored.maskSecretsOnExport);
+      if (stored.checkUpdates !== undefined) setCheckUpdates(stored.checkUpdates);
       if (stored.language === 'en' || stored.language === 'ru') {
         applyLanguage(stored.language);
         setLanguage(stored.language);
@@ -45,6 +48,11 @@ export function usePreferences() {
     saveStored({ maskSecretsOnExport: enabled });
   }, []);
 
+  const handleCheckUpdatesChange = useCallback((enabled: boolean) => {
+    setCheckUpdates(enabled);
+    saveStored({ checkUpdates: enabled });
+  }, []);
+
   const handleLanguageChange = useCallback((next: Language) => {
     applyLanguage(next);
     setLanguage(next);
@@ -52,7 +60,7 @@ export function usePreferences() {
   }, []);
 
   return {
-    darkMode, fontSize, maskSecretsOnExport, language,
-    handleDarkModeChange, handleFontSizeChange, handleMaskSecretsChange, handleLanguageChange,
+    darkMode, fontSize, maskSecretsOnExport, language, checkUpdates,
+    handleDarkModeChange, handleFontSizeChange, handleMaskSecretsChange, handleLanguageChange, handleCheckUpdatesChange,
   };
 }

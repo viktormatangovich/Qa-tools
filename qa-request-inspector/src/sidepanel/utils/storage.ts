@@ -1,4 +1,6 @@
 import type { FontSize } from '../components/settings/SettingsPanel';
+import type { LatestVersion } from './version';
+import type { WatchedEndpoint } from './watchdog';
 import type { QASettings } from '../qa/core/types';
 import type { ApiRequest, CaptureSettings, JiraSettings, Language, RequestCollection, RequestMeta, RequestTag, Session } from '../types';
 
@@ -18,6 +20,13 @@ export interface StoredState {
   qaSettings: QASettings;
   contractSpecText: string;
   excludedQARuleIds: string[];
+  /** Ask GitHub once a day whether a newer version exists (hooks/useUpdateCheck). */
+  checkUpdates: boolean;
+  updateCheck: { checkedAt: number; latest?: LatestVersion };
+  dismissedUpdateVersion: string;
+  /** Version whose "What's new" the user has seen. */
+  lastSeenVersion: string;
+  watchedEndpoints: WatchedEndpoint[];
 }
 
 export async function loadStored<K extends keyof StoredState>(keys: K[]): Promise<Partial<Pick<StoredState, K>>> {

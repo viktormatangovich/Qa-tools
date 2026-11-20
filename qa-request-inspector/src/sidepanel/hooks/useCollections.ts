@@ -121,7 +121,20 @@ export function useCollections() {
     saveStored({ requestMeta: newMeta });
   }, [requestMeta]);
 
+  /** QA note of a request; an empty text removes it. */
+  const setNote = useCallback((requestId: string, note: string) => {
+    setRequestMeta((previous) => {
+      const current = previous[requestId] || ({} as RequestMeta);
+      const text = note.trim() ? note : undefined;
+      if ((current.notes || undefined) === text) return previous;
+      const next = { ...previous, [requestId]: { ...current, notes: text } };
+      saveStored({ requestMeta: next });
+      return next;
+    });
+  }, []);
+
   return {
+    setNote,
     collections,
     tags,
     requestMeta,

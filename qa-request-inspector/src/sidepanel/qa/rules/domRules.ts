@@ -1,14 +1,15 @@
 import type { QAAnalysisInput } from "../core/rulesEngine";
 import type { DOMFinding, QAIssue, QAIssueSeverity, QARule } from "../core/types";
+import { qt } from "../messages.ts";
 
 const domRuleMetadata = {
-  "positive-tabindex": { category: "accessibility" as const, severity: "warning" as const, title: "Нестандартный порядок фокуса", description: "Положительный tabindex меняет естественный порядок клавиатурной навигации." },
-  "clickable-without-keyboard": { category: "accessibility" as const, severity: "warning" as const, title: "Элемент недоступен с клавиатуры", description: "Элемент с ролью кнопки или обработчиком клика не включён в порядок фокуса." },
-  "low-contrast": { category: "accessibility" as const, severity: "warning" as const, title: "Низкий контраст текста", description: "Контраст текста на сплошном непрозрачном фоне ниже порога WCAG AA. Проверьте визуально." },
-  "broken-image": { category: "dom" as const, severity: "warning" as const, title: "Не загрузилось изображение", description: "Загрузка изображения завершилась без доступных данных." },
-  "missing-alt": { category: "accessibility" as const, severity: "warning" as const, title: "У изображения нет alt", description: "У изображения нет атрибута alt, и оно не помечено как декоративное." },
-  "input-without-label": { category: "accessibility" as const, severity: "warning" as const, title: "У поля нет доступного имени", description: "У элемента формы нет связанной метки или ARIA-имени." },
-  "button-without-accessible-name": { category: "accessibility" as const, severity: "warning" as const, title: "У кнопки нет доступного имени", description: "У кнопки нет текста, метки или другого доступного имени." },
+  "positive-tabindex": { category: "accessibility" as const, severity: "warning" as const },
+  "clickable-without-keyboard": { category: "accessibility" as const, severity: "warning" as const },
+  "low-contrast": { category: "accessibility" as const, severity: "warning" as const },
+  "broken-image": { category: "dom" as const, severity: "warning" as const },
+  "missing-alt": { category: "accessibility" as const, severity: "warning" as const },
+  "input-without-label": { category: "accessibility" as const, severity: "warning" as const },
+  "button-without-accessible-name": { category: "accessibility" as const, severity: "warning" as const },
 };
 
 /** Built-in checks that the axe-core audit covers with its own rules; they are dropped when axe ran. */
@@ -59,13 +60,14 @@ export const domAccessibilityRule: QARule<QAAnalysisInput> = {
   check: ({ domFindings, settings }) => !settings.accessibilityEnabled ? [] : domFindings.map((finding, index) => {
     if (finding.type === "axe") return axeIssue(finding, index);
     const metadata = domRuleMetadata[finding.type];
+    const text = qt().dom[finding.type];
     return {
       id: `dom.accessibility-basics:${finding.type}:${finding.selector}`,
       ruleId: "dom.accessibility-basics",
       category: metadata.category,
       severity: metadata.severity,
-      title: metadata.title,
-      description: metadata.description,
+      title: text.title,
+      description: text.description,
       timestamp: finding.timestamp,
       url: finding.pageUrl,
       evidence: {

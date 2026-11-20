@@ -1,9 +1,10 @@
 import type { ApiRequest, ConsoleError } from '../types'
-import { formatBytes, getPayloadSize } from './helpers'
+import { formatBytes, getPayloadSize } from './helpers.ts'
+import { qt } from '../qa/messages.ts'
 
 export function formatJsonForExport(data: unknown): string {
   try {
-    if (data === null || data === undefined) return '(пусто)'
+    if (data === null || data === undefined) return qt().empty
     if (typeof data === 'string') {
       try {
         return JSON.stringify(JSON.parse(data), null, 2)
@@ -19,23 +20,24 @@ export function formatJsonForExport(data: unknown): string {
 
 export function generateClaudePrompt(req: ApiRequest): string {
   const isError = req.status >= 400 || req.error
+  const m = qt()
 
-  let prompt = `## ${isError ? 'Отчёт об ошибке API' : 'Отчёт о запросе API'}
+  let prompt = `## ${isError ? m.promptErrorTitle : m.promptRequestTitle}
 
-**Маршрут:** \`${req.method} ${req.url}\`
-**Статус:** ${req.status} ${req.statusText}
-**Длительность:** ${(req.duration / 1000).toFixed(2)}s
-**Тип:** ${req.type.toUpperCase()}
-${req.error ? `**Ошибка:** ${req.error}` : ''}
+**${m.promptRoute}:** \`${req.method} ${req.url}\`
+**${m.promptStatus}:** ${req.status} ${req.statusText}
+**${m.promptDuration}:** ${(req.duration / 1000).toFixed(2)}s
+**${m.promptType}:** ${req.type.toUpperCase()}
+${req.error ? `**${m.promptError}:** ${req.error}` : ''}
 
-### Контекст страницы
+### ${m.promptPageContext}
 - **URL:** ${req.pageUrl}
-- **Заголовок:** ${req.pageTitle}
+- **${m.promptPageTitle}:** ${req.pageTitle}
 
 `
 
   if (req.requestBody) {
-    prompt += `### Тело запроса
+    prompt += `### ${m.requestBody}
 \`\`\`json
 ${formatJsonForExport(req.requestBody)}
 \`\`\`
@@ -44,7 +46,7 @@ ${formatJsonForExport(req.requestBody)}
   }
 
   if (req.requestHeaders && Object.keys(req.requestHeaders).length > 0) {
-    prompt += `### Заголовки запроса
+    prompt += `### ${m.requestHeaders}
 \`\`\`
 ${Object.entries(req.requestHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 \`\`\`
@@ -52,7 +54,7 @@ ${Object.entries(req.requestHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 `
   }
 
-  prompt += `### Тело ответа
+  prompt += `### ${m.responseBody}
 \`\`\`json
 ${formatJsonForExport(req.responseBody)}
 \`\`\`
@@ -60,7 +62,7 @@ ${formatJsonForExport(req.responseBody)}
 `
 
   if (req.responseHeaders && Object.keys(req.responseHeaders).length > 0) {
-    prompt += `### Заголовки ответа
+    prompt += `### ${m.responseHeaders}
 \`\`\`
 ${Object.entries(req.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 \`\`\`
@@ -69,11 +71,7 @@ ${Object.entries(req.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
   }
 
   prompt += `---
-Помоги ${isError ? 'разобраться с ошибкой API' : 'проанализировать ответ API'}. ${
-  isError
-    ? 'Что могло вызвать проблему и как её исправить?'
-    : 'Есть ли проблемы в этом запросе или ответе?'
-}
+${isError ? m.promptAskError : m.promptAskRequest}
 `
 
   return prompt
@@ -184,6 +182,8 @@ export function generateHar(requests: ApiRequest[]) {
               wait: req.duration,
               receive: 0,
             },
+        // The QA note travels in the standard HAR comment field (read back by harImport.ts).
+        ...(req.note ? { comment: req.note } : {}),
       })),
     },
   }
@@ -192,9 +192,9 @@ export function generateHar(requests: ApiRequest[]) {
 export function generatePostmanCollection(requests: ApiRequest[]) {
   return {
     info: {
-      name: `Экспорт QA Tools - ${new Date().toISOString().slice(0, 10)}`,
+      name: qt().postmanName(new Date().toISOString().slice(0, 10)),
       schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
-      description: 'Экспорт из расширения QA Tools',
+      description: qt().postmanDescription,
     },
     item: requests.map(req => {
       const urlParts = (() => {
@@ -260,13 +260,13 @@ export function generatePostmanCollection(requests: ApiRequest[]) {
 
 export function generateTypeScript(req: ApiRequest): string {
   const data = req.responseBody
-  if (!data) return '// Нет тела ответа для генерации типов'
+  if (!data) return qt().tsNoBody
 
   let parsed: unknown
   try {
     parsed = typeof data === 'string' ? JSON.parse(data) : data
   } catch {
-    return '// Нельзя создать типы: ответ содержит некорректный JSON'
+    return qt().tsInvalidJson
   }
 
   function inferType(value: unknown, name: string, indent = ''): string {
@@ -308,7 +308,7 @@ export function generateTypeScript(req: ApiRequest): string {
     const typeBody = inferType(parsed, 'Response', '')
     return `interface ApiResponse ${typeBody}`
   } catch {
-    return '// Не удалось создать типы из ответа'
+    return qt().tsFailed
   }
 }
 
@@ -373,41 +373,43 @@ export function generateMarkdownReport(
   consoleErrors: ConsoleError[],
   pageInfo: { url: string; title: string }
 ): string {
+  const m = qt()
   const stats = calculateReportStats(requests)
   const now = new Date()
   const timestamp = now.toLocaleString()
+  const noteLine = (req: ApiRequest) => req.note?.trim() ? `- **${m.note}:** ${req.note.trim()}\n` : ''
 
-  let report = `# Отчёт по API
+  let report = `# ${m.mdTitle}
 
-**Сформирован:** ${timestamp}
-**Страница:** ${pageInfo.title || 'Недоступно'}
-**URL:** ${pageInfo.url || 'Недоступно'}
+**${m.mdGenerated}:** ${timestamp}
+**${m.mdPage}:** ${pageInfo.title || m.notAvailable}
+**URL:** ${pageInfo.url || m.notAvailable}
 
 ---
 
-## Сводка
+## ${m.mdSummary}
 
-| Показатель | Значение |
+| ${m.mdMetric} | ${m.mdValue} |
 |--------|-------|
-| Всего запросов | ${stats.total} |
-| Успешные (2xx) | ${stats.successful} |
-| Ошибки клиента (4xx) | ${stats.clientErrors} |
-| Ошибки сервера (5xx) | ${stats.serverErrors} |
-| Сетевые ошибки | ${stats.networkErrors} |
-| Доля успешных | ${stats.successRate.toFixed(1)}% |
-| Среднее время ответа | ${Math.round(stats.avgTime)}ms |
-| Минимальное время ответа | ${Math.round(stats.minTime)}ms |
-| Максимальное время ответа | ${Math.round(stats.maxTime)}ms |
-| Объём данных | ${formatBytes(stats.totalSize)} |
+| ${m.mdTotal} | ${stats.total} |
+| ${m.mdSuccessful} | ${stats.successful} |
+| ${m.mdClientErrors} | ${stats.clientErrors} |
+| ${m.mdServerErrors} | ${stats.serverErrors} |
+| ${m.mdNetworkErrors} | ${stats.networkErrors} |
+| ${m.mdSuccessRate} | ${stats.successRate.toFixed(1)}% |
+| ${m.mdAvgTime} | ${Math.round(stats.avgTime)}ms |
+| ${m.mdMinTime} | ${Math.round(stats.minTime)}ms |
+| ${m.mdMaxTime} | ${Math.round(stats.maxTime)}ms |
+| ${m.mdDataSize} | ${formatBytes(stats.totalSize)} |
 
 `
 
   // Status code distribution
   const statusCodes = Object.keys(stats.statusDistribution).map(Number).sort((a, b) => a - b)
   if (statusCodes.length > 0) {
-    report += `### Распределение статусов
+    report += `### ${m.mdStatusDistribution}
 
-| Статус | Количество |
+| ${m.mdStatus} | ${m.mdCount} |
 |--------|-------|
 `
     statusCodes.forEach(status => {
@@ -418,9 +420,9 @@ export function generateMarkdownReport(
 
   // Slowest requests
   if (stats.slowRequests.length > 0) {
-    report += `### Медленные запросы (>500 мс)
+    report += `### ${m.mdSlowRequests}
 
-| URL | Метод | Время | Статус |
+| URL | ${m.mdMethod} | ${m.mdTime} | ${m.mdStatus} |
 |-----|--------|----------|--------|
 `
     stats.slowRequests.slice(0, 10).forEach(req => {
@@ -439,7 +441,7 @@ export function generateMarkdownReport(
   if (failedRequests.length > 0) {
     report += `---
 
-## Неуспешные запросы (${failedRequests.length})
+## ${m.mdFailedRequests(failedRequests.length)}
 
 `
     failedRequests.forEach((req, i) => {
@@ -450,14 +452,14 @@ export function generateMarkdownReport(
 
       report += `### ${i + 1}. ${req.method} ${pathname}
 
-- **Статус:** ${req.status} ${req.statusText || ''}
-- **Длительность:** ${req.duration}ms
-- **Время:** ${new Date(req.timestamp).toLocaleTimeString()}
-${req.error ? `- **Ошибка:** ${req.error}` : ''}
-
+- **${m.mdStatus}:** ${req.status} ${req.statusText || ''}
+- **${m.mdDuration}:** ${req.duration}ms
+- **${m.mdTime}:** ${new Date(req.timestamp).toLocaleTimeString()}
+${req.error ? `- **${m.mdError}:** ${req.error}` : ''}
+${noteLine(req)}
 `
       if (req.responseBody) {
-        report += `**Ответ:**
+        report += `**${m.mdResponse}:**
 \`\`\`json
 ${formatJsonForExport(req.responseBody)}
 \`\`\`
@@ -470,7 +472,7 @@ ${formatJsonForExport(req.responseBody)}
   // All requests
   report += `---
 
-## Все запросы (${requests.length})
+## ${m.mdAllRequests(requests.length)}
 
 `
   requests.forEach(req => {
@@ -481,14 +483,14 @@ ${formatJsonForExport(req.responseBody)}
 
     report += `### ${req.method} ${pathname}
 
-- **Статус:** ${req.status} ${req.statusText || ''}
-- **Длительность:** ${req.duration}ms
-- **Время:** ${new Date(req.timestamp).toLocaleTimeString()}
-
+- **${m.mdStatus}:** ${req.status} ${req.statusText || ''}
+- **${m.mdDuration}:** ${req.duration}ms
+- **${m.mdTime}:** ${new Date(req.timestamp).toLocaleTimeString()}
+${noteLine(req)}
 `
 
     if (req.requestHeaders && Object.keys(req.requestHeaders).length > 0) {
-      report += `**Заголовки запроса:**
+      report += `**${m.requestHeaders}:**
 \`\`\`
 ${Object.entries(req.requestHeaders).map(([k, v]) => {
   // Mask sensitive headers
@@ -503,7 +505,7 @@ ${Object.entries(req.requestHeaders).map(([k, v]) => {
     }
 
     if (req.requestBody) {
-      report += `**Тело запроса:**
+      report += `**${m.requestBody}:**
 \`\`\`json
 ${formatJsonForExport(req.requestBody)}
 \`\`\`
@@ -512,7 +514,7 @@ ${formatJsonForExport(req.requestBody)}
     }
 
     if (req.responseHeaders && Object.keys(req.responseHeaders).length > 0) {
-      report += `**Заголовки ответа:**
+      report += `**${m.responseHeaders}:**
 \`\`\`
 ${Object.entries(req.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 \`\`\`
@@ -522,8 +524,8 @@ ${Object.entries(req.responseHeaders).map(([k, v]) => `${k}: ${v}`).join('\n')}
 
     if (req.responseBody) {
       const bodyStr = formatJsonForExport(req.responseBody)
-      const truncated = bodyStr.length > 2000 ? bodyStr.slice(0, 2000) + '\n... (сокращено)' : bodyStr
-      report += `**Тело ответа:**
+      const truncated = bodyStr.length > 2000 ? bodyStr.slice(0, 2000) + '\n' + m.mdTruncated : bodyStr
+      report += `**${m.responseBody}:**
 \`\`\`json
 ${truncated}
 \`\`\`
@@ -532,23 +534,23 @@ ${truncated}
     }
   })
 
-  // Ошибки консоли
+  // Console errors
   if (consoleErrors.length > 0) {
     report += `---
 
-## Ошибки консоли (${consoleErrors.length})
+## ${m.mdConsoleErrors(consoleErrors.length)}
 
 `
     consoleErrors.forEach((err, i) => {
       report += `### ${i + 1}. ${err.message.slice(0, 100)}${err.message.length > 100 ? '...' : ''}
 
-- **Тип:** ${err.type}
-${err.filename ? `- **Файл:** ${err.filename}${err.lineno ? `:${err.lineno}` : ''}${err.colno ? `:${err.colno}` : ''}` : ''}
-- **Время:** ${new Date(err.timestamp).toLocaleTimeString()}
+- **${m.mdType}:** ${err.type}
+${err.filename ? `- **${m.mdFile}:** ${err.filename}${err.lineno ? `:${err.lineno}` : ''}${err.colno ? `:${err.colno}` : ''}` : ''}
+- **${m.mdTime}:** ${new Date(err.timestamp).toLocaleTimeString()}
 
 `
       if (err.stack) {
-        report += `**Стек вызовов:**
+        report += `**${m.mdStack}:**
 \`\`\`
 ${err.stack}
 \`\`\`
@@ -560,7 +562,7 @@ ${err.stack}
 
   report += `---
 
-*Отчёт сформирован расширением QA Tools*
+${m.mdFooter}
 `
 
   return report

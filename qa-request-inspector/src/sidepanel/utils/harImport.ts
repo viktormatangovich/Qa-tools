@@ -21,6 +21,7 @@ interface HarEntry {
     httpVersion?: string;
   };
   timings?: Record<string, number | undefined>;
+  comment?: unknown;
 }
 
 const RESOURCE_TYPES: Record<string, ResourceType> = {
@@ -124,6 +125,8 @@ export function parseHar(text: string): ApiRequest[] {
       ...(Number.isFinite(transferSize) && transferSize > 0 ? { transferSize } : {}),
       ...(entry.response?.httpVersion ? { protocol: entry.response.httpVersion } : {}),
       ...(entry.serverIPAddress ? { remoteAddress: entry.serverIPAddress } : {}),
+      // generateHar writes the QA note into the standard HAR comment field.
+      ...(typeof entry.comment === 'string' && entry.comment.trim() ? { note: entry.comment } : {}),
     }));
   }
   return requests.sort((a, b) => b.timestamp - a.timestamp);

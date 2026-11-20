@@ -1,6 +1,7 @@
 import { en } from "./en";
 import { ru } from "./ru";
 import type { Language } from "../types";
+import { setQaLanguage } from "../qa/messages";
 
 export type LocaleStrings = typeof ru;
 export type { Language };
@@ -20,6 +21,7 @@ export function getLanguage(): Language {
 /** Switches the language of t(); the caller re-renders the panel (see usePreferences). */
 export function setLanguage(language: Language): void {
   currentLanguage = language in locales ? language : "ru";
+  setQaLanguage(currentLanguage);
   if (typeof document !== "undefined") document.documentElement.lang = currentLanguage;
 }
 

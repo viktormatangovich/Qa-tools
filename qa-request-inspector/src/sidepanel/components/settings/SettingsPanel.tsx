@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import type { WatchedEndpoint } from '../../utils/watchdog'
 import { Languages, Settings, X, Moon, Sun, Type } from 'lucide-react'
 import { MAX_REQUESTS, MIN_REQUESTS } from '../../hooks/useCaptureSettings'
 import { t } from '../../locales'
@@ -25,6 +26,11 @@ interface SettingsPanelProps {
   onLanguageChange: (language: Language) => void
   jiraSettings: JiraSettings
   onJiraSettingsChange: (settings: JiraSettings) => void
+  checkUpdates?: boolean
+  onCheckUpdatesChange?: (enabled: boolean) => void
+  watchedEndpoints?: WatchedEndpoint[]
+  onWatchedEndpointsChange?: (endpoints: WatchedEndpoint[]) => void
+  onShowWhatsNew?: () => void
 }
 
 export function SettingsPanel({
@@ -43,6 +49,11 @@ export function SettingsPanel({
   onLanguageChange,
   jiraSettings,
   onJiraSettingsChange,
+  checkUpdates = true,
+  onCheckUpdatesChange,
+  watchedEndpoints = [],
+  onWatchedEndpointsChange,
+  onShowWhatsNew,
 }: SettingsPanelProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
   const [transferError, setTransferError] = useState<string | null>(null)
@@ -221,6 +232,46 @@ export function SettingsPanel({
           {transferError && <p role="alert" className="text-[10px] text-red-600">{transferError}</p>}
           <p className="text-[10px] text-text-muted">{t().settingsTransferHint}</p>
         </div>
+
+        {/* Watchdog: endpoints whose errors and slow answers raise an alert */}
+        {onWatchedEndpointsChange && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">{t().watchdogTitle}</div>
+            {watchedEndpoints.length === 0 && <p className="text-[10px] text-text-muted">{t().watchdogEmpty}</p>}
+            {watchedEndpoints.map((endpoint) => (
+              <div key={endpoint.key} className="flex items-center gap-2 text-xs">
+                <span className="flex-1 min-w-0 truncate font-mono" title={endpoint.key}>{endpoint.key}</span>
+                <label className="flex items-center gap-1 text-[10px] text-text-muted" title={t().watchdogSlowHint}>
+                  &gt;
+                  <input
+                    type="number"
+                    min={100}
+                    step={100}
+                    value={endpoint.slowMs}
+                    onChange={(event) => onWatchedEndpointsChange(watchedEndpoints.map((item) => item.key === endpoint.key ? { ...item, slowMs: Math.max(100, Number(event.target.value) || 100) } : item))}
+                    className="w-16 rounded border border-border bg-surface px-1 py-0.5 text-xs"
+                  />
+                  {t().watchdogMs}
+                </label>
+                <button onClick={() => onWatchedEndpointsChange(watchedEndpoints.filter((item) => item.key !== endpoint.key))} className="text-red-500 hover:underline text-[10px]">{t().remove}</button>
+              </div>
+            ))}
+            <p className="text-[10px] text-text-muted">{t().watchdogHint}</p>
+          </div>
+        )}
+
+        {/* Updates */}
+        {onCheckUpdatesChange && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">{t().updatesTitle}</div>
+            <label className="flex items-center justify-between gap-3 text-xs">
+              <span>{t().checkUpdates}</span>
+              <input type="checkbox" checked={checkUpdates} onChange={(event) => onCheckUpdatesChange(event.target.checked)} />
+            </label>
+            <p className="text-[10px] text-text-muted">{t().checkUpdatesHint}</p>
+            {onShowWhatsNew && <button onClick={onShowWhatsNew} className="text-xs text-accent hover:underline">{t().whatsNewMenu}</button>}
+          </div>
+        )}
 
         {/* Export */}
         <div className="space-y-2">

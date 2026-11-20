@@ -5,21 +5,19 @@ interface ShortcutMap {
   [key: string]: () => void;
 }
 
-export function useKeyboardShortcuts(shortcuts: ShortcutMap) {
+/** `allowInInputs`: shortcuts that work while typing too (Ctrl+K opens the palette from a search field). */
+export function useKeyboardShortcuts(shortcuts: ShortcutMap, allowInInputs: string[] = []) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Don't trigger shortcuts when typing in inputs
       const target = e.target as HTMLElement;
-      if (
+      const typing =
         target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
         target.tagName === "SELECT" ||
-        target.isContentEditable
-      ) {
-        return;
-      }
+        target.isContentEditable;
 
-      const key = e.key.toLowerCase();
+      // Letters by physical key: Ctrl+K also works with the Russian layout (where e.key is "л").
+      const key = e.code?.startsWith("Key") ? e.code.slice(3).toLowerCase() : e.key.toLowerCase();
       const ctrl = e.ctrlKey || e.metaKey;
       const shift = e.shiftKey;
       const alt = e.altKey;
@@ -32,6 +30,8 @@ export function useKeyboardShortcuts(shortcuts: ShortcutMap) {
       parts.push(key);
       const shortcutKey = parts.join("+");
 
+      // Don't trigger shortcuts when typing in inputs
+      if (typing && !allowInInputs.includes(shortcutKey)) return;
       if (shortcuts[shortcutKey]) {
         e.preventDefault();
         shortcuts[shortcutKey]();
@@ -40,11 +40,12 @@ export function useKeyboardShortcuts(shortcuts: ShortcutMap) {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [shortcuts]);
+  }, [shortcuts, allowInInputs]);
 }
 
 /** Shortcut → key of its description in the locale dictionary (read it with t()[key] at render time). */
 export const DEFAULT_SHORTCUTS: Record<string, keyof LocaleStrings> = {
+  "ctrl+k": "shortcutPalette",
   "ctrl+f": "shortcutSearchUrl",
   "ctrl+shift+f": "shortcutSearchBody",
   "ctrl+e": "shortcutExport",

@@ -1,4 +1,5 @@
 ﻿import type { ApiRequest } from "../types";
+import { qt } from "./messages.ts";
 export interface CompareOptions { ignoredPaths: string[]; timingMs: number; timingPercent: number; }
 export const defaultCompareOptions: CompareOptions = { ignoredPaths: [], timingMs: 100, timingPercent: 20 };
 export interface EnvironmentDifference { key: string; left?: ApiRequest; right?: ApiRequest; changes: string[]; }
@@ -19,7 +20,7 @@ function bodyDiff(a: unknown, b: unknown, path = '$'): string[] {
     const left = a as Record<string, unknown>, right = b as Record<string, unknown>;
     return [...new Set([...Object.keys(left), ...Object.keys(right)])].flatMap(key => bodyDiff(left[key], right[key], Array.isArray(a) ? `${path}[${key}]` : `${path}.${key}`));
   }
-  const display = (value: unknown) => value === undefined ? 'отсутствует' : JSON.stringify(value)?.slice(0, 160);
+  const display = (value: unknown) => value === undefined ? qt().envMissing : JSON.stringify(value)?.slice(0, 160);
   return [`${path}: ${display(a)} → ${display(b)}`];
 }
 export function compareEnvironments(left: ApiRequest[], right: ApiRequest[], options: CompareOptions = defaultCompareOptions): EnvironmentDifference[] {
@@ -34,15 +35,15 @@ export function compareEnvironments(left: ApiRequest[], right: ApiRequest[], opt
     return Array.from({ length: Math.max(first.length, second.length) }, (_, index) => {
       const l = first[index], r = second[index];
       const changes: string[] = [];
-      if (!l) changes.push('Запрос появился во второй сессии.');
-      else if (!r) changes.push('Запрос отсутствует во второй сессии.');
+      if (!l) changes.push(qt().envAppeared);
+      else if (!r) changes.push(qt().envDisappeared);
       else {
-        if (l.status !== r.status) changes.push(`Статус: ${l.status} → ${r.status}`);
-        if (r.duration - l.duration > options.timingMs && (l.duration === 0 || (r.duration / l.duration - 1) * 100 > options.timingPercent)) changes.push(`Замедление: ${l.duration} → ${r.duration} мс`);
+        if (l.status !== r.status) changes.push(qt().envStatus(l.status, r.status));
+        if (r.duration - l.duration > options.timingMs && (l.duration === 0 || (r.duration / l.duration - 1) * 100 > options.timingPercent)) changes.push(qt().envSlower(l.duration, r.duration));
         const headers = (value: Record<string, string>) => Object.fromEntries(Object.entries(value).map(([name, text]) => [name.toLowerCase(), text]));
         changes.push(...bodyDiff(normalized(headers(l.responseHeaders), options.ignoredPaths), normalized(headers(r.responseHeaders), options.ignoredPaths), '$headers'), ...bodyDiff(normalized(l.responseBody, options.ignoredPaths), normalized(r.responseBody, options.ignoredPaths)));
       }
-      return { key: `${key} · вызов ${index + 1}`, left: l, right: r, changes };
+      return { key: qt().envCall(key, index + 1), left: l, right: r, changes };
     }).filter(entry => entry.changes.length);
   });
 }

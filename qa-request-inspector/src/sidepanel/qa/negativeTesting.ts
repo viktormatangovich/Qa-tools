@@ -1,6 +1,7 @@
 import type { ApiRequest, MockRule } from "../types";
 import { matchEndpoint } from "./contract/contractChecker.ts";
 import type { OpenApiDocument, OpenApiSchema } from "./contract/types";
+import { qt } from "./messages.ts";
 
 export type NegativeScenario = "401" | "403" | "404" | "409" | "429" | "500" | "502" | "503" | "empty" | "malformed-json" | "missing-field" | "null-field" | "delay-1s" | "delay-3s" | "delay-5s" | "timeout";
 
@@ -22,13 +23,13 @@ export function negativeTestTargets(request: ApiRequest, document?: OpenApiDocum
   const body = parseBody(request);
   const bodySchema = resolveSchema(Object.values(matched?.operation.requestBody?.content || {}).find((entry) => entry.schema)?.schema, document);
   const bodyNames = new Set([...(body ? Object.keys(body) : []), ...Object.keys(bodySchema?.properties || {})]);
-  const targets: Target[] = [...bodyNames].map((name) => ({ id: `body:${name}`, label: `Тело запроса · ${name}`, kind: "body", name, schema: resolveSchema(bodySchema?.properties?.[name], document), required: bodySchema?.required?.includes(name) }));
+  const targets: Target[] = [...bodyNames].map((name) => ({ id: `body:${name}`, label: qt().negBodyTarget(name), kind: "body", name, schema: resolveSchema(bodySchema?.properties?.[name], document), required: bodySchema?.required?.includes(name) }));
   const url = new URL(request.url);
   for (const parameter of matched?.operation.parameters || []) {
     const present = parameter.in === "query" ? url.searchParams.has(parameter.name) : parameter.in === "header" ? Object.keys(request.requestHeaders).some((key) => key.toLowerCase() === parameter.name.toLowerCase()) : true;
-    if (present || parameter.required) targets.push({ id: `${parameter.in}:${parameter.name}`, label: `${parameter.in === "query" ? "Query" : parameter.in === "path" ? "Path" : "Заголовок"} · ${parameter.name}`, kind: parameter.in, name: parameter.name, schema: resolveSchema(parameter.schema, document), required: parameter.required });
+    if (present || parameter.required) targets.push({ id: `${parameter.in}:${parameter.name}`, label: `${parameter.in === "query" ? "Query" : parameter.in === "path" ? "Path" : qt().negHeader} · ${parameter.name}`, kind: parameter.in, name: parameter.name, schema: resolveSchema(parameter.schema, document), required: parameter.required });
   }
-  if (!targets.length) targets.push({ id: "request", label: "Запрос целиком", kind: "body", name: "" });
+  if (!targets.length) targets.push({ id: "request", label: qt().negWholeRequest, kind: "body", name: "" });
   return targets;
 }
 
@@ -57,20 +58,21 @@ export function generateNegativeTests(request: ApiRequest, targetId?: string, do
   const targets = negativeTestTargets(request, document);
   const target = targets.find((item) => item.id === targetId) || targets[0];
   const schema = target.schema;
+  const m = qt();
   const tests: NegativeTestCase[] = [
-    testCase(request, target, "null", "null", "Передать null вместо корректного значения.", null), testCase(request, target, "empty", "Пустая строка", "Передать пустую строку.", ""), testCase(request, target, "minus-one", "-1", "Проверить отрицательное значение.", -1), testCase(request, target, "zero", "0", "Проверить нулевое значение.", 0), testCase(request, target, "long", "Слишком длинная строка", "Передать строку длиной 10 001 символ.", "x".repeat(10_001)), testCase(request, target, "wrong-type", "Неправильный тип", "Передать значение другого типа.", wrongType(schema)),
+    testCase(request, target, "null", "null", m.negNullDescription, null), testCase(request, target, "empty", m.negEmptyTitle, m.negEmptyDescription, ""), testCase(request, target, "minus-one", "-1", m.negMinusOneDescription, -1), testCase(request, target, "zero", "0", m.negZeroDescription, 0), testCase(request, target, "long", m.negLongTitle, m.negLongDescription, "x".repeat(10_001)), testCase(request, target, "wrong-type", m.negWrongTypeTitle, m.negWrongTypeDescription, wrongType(schema)),
   ];
-  if (target.required || target.kind === "body" || target.kind === "query") tests.push(testCase(request, target, "missing", "Обязательное поле отсутствует", "Удалить поле или параметр из запроса.", undefined, true));
-  if (schema?.minimum !== undefined) tests.push(testCase(request, target, "below-min", `Ниже min (${schema.minimum - 1})`, "Значение за нижней границей из OpenAPI.", schema.minimum - 1));
-  if (schema?.maximum !== undefined) tests.push(testCase(request, target, "above-max", `Выше max (${schema.maximum + 1})`, "Значение за верхней границей из OpenAPI.", schema.maximum + 1));
-  if (schema?.minLength !== undefined) tests.push(testCase(request, target, "below-min-length", `Короче minLength (${Math.max(0, schema.minLength - 1)})`, "Строка короче ограничения OpenAPI.", "x".repeat(Math.max(0, schema.minLength - 1))));
-  if (schema?.maxLength !== undefined) tests.push(testCase(request, target, "above-max-length", `Длиннее maxLength (${schema.maxLength + 1})`, "Строка длиннее ограничения OpenAPI.", "x".repeat(schema.maxLength + 1)));
+  if (target.required || target.kind === "body" || target.kind === "query") tests.push(testCase(request, target, "missing", m.negMissingTitle, m.negMissingDescription, undefined, true));
+  if (schema?.minimum !== undefined) tests.push(testCase(request, target, "below-min", m.negBelowMin(schema.minimum - 1), m.negBelowMinDescription, schema.minimum - 1));
+  if (schema?.maximum !== undefined) tests.push(testCase(request, target, "above-max", m.negAboveMax(schema.maximum + 1), m.negAboveMaxDescription, schema.maximum + 1));
+  if (schema?.minLength !== undefined) tests.push(testCase(request, target, "below-min-length", m.negBelowMinLength(Math.max(0, schema.minLength - 1)), m.negBelowMinLengthDescription, "x".repeat(Math.max(0, schema.minLength - 1))));
+  if (schema?.maxLength !== undefined) tests.push(testCase(request, target, "above-max-length", m.negAboveMaxLength(schema.maxLength + 1), m.negAboveMaxLengthDescription, "x".repeat(schema.maxLength + 1)));
   return tests;
 }
 
 export const responseNegativeScenarios: NegativeScenario[] = ["401", "403", "404", "409", "429", "500", "503", "delay-1s", "delay-3s", "delay-5s", "timeout"];
 export function createNegativeMock(request: ApiRequest, scenario: NegativeScenario): MockRule {
   const status = Number(scenario); const delay = scenario.startsWith("delay-") ? Number(scenario.match(/\d+/)?.[0]) * 1000 : 0;
-  const responseBody = scenario === "empty" ? "" : scenario === "malformed-json" ? "{invalid" : scenario === "missing-field" ? "{}" : scenario === "null-field" ? '{"value":null}' : JSON.stringify({ error: scenario === "500" ? "Симуляция ошибки сервера" : `Симуляция ${scenario}` });
-  return { id: crypto.randomUUID(), urlPattern: request.url, method: request.method as MockRule["method"], status: Number.isFinite(status) ? status : 200, statusText: `QA-сценарий: ${scenario}`, responseBody, responseHeaders: { "content-type": "application/json" }, enabled: true, delay, abort: scenario === "timeout", description: `Временный негативный тест: ${scenario}`, createdAt: Date.now(), updatedAt: Date.now() };
+  const responseBody = scenario === "empty" ? "" : scenario === "malformed-json" ? "{invalid" : scenario === "missing-field" ? "{}" : scenario === "null-field" ? '{"value":null}' : JSON.stringify({ error: scenario === "500" ? qt().negServerErrorBody : qt().negScenarioBody(scenario) });
+  return { id: crypto.randomUUID(), urlPattern: request.url, method: request.method as MockRule["method"], status: Number.isFinite(status) ? status : 200, statusText: qt().negStatusText(scenario), responseBody, responseHeaders: { "content-type": "application/json" }, enabled: true, delay, abort: scenario === "timeout", description: qt().negMockDescription(scenario), createdAt: Date.now(), updatedAt: Date.now() };
 }

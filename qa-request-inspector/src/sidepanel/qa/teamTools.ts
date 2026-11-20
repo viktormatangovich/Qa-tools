@@ -2,6 +2,7 @@ import type { ApiRequest, MockRule, Session } from '../types';
 import type { QASettings } from './core/types';
 import type { CompareOptions } from './environmentCompare';
 import type { NegativeTestCase } from './negativeTesting';
+import { qt } from './messages.ts';
 
 export type Environment = 'local' | 'test' | 'production';
 export interface BusinessRule { id: string; name: string; path: string; operator: 'exists' | 'equals' | 'gte' | 'sum'; expected: string; sumPath?: string; }
@@ -142,12 +143,13 @@ export function evaluateBusinessRule(body: unknown, rule: BusinessRule): boolean
   return typeof value === 'number' && Array.isArray(entries) && entries.every(item => typeof item === 'number') && Math.abs(entries.reduce((sum: number, item) => sum + (item as number), 0) - value) < 0.000001;
 }
 export function jiraReport(title: string, steps: ManualStep[], expected: string, actual: string, environment: Environment, request?: ApiRequest): string {
-  const env = { local: 'Локальное', test: 'Тестовое', production: 'Продакшен' }[environment];
-  return `h2. ${title}\n\nh3. Окружение\n${env}\n${typeof navigator === 'undefined' ? '' : navigator.userAgent}\n\nh3. Предусловия\nУкажите учётную запись и необходимые данные.\n\nh3. Шаги воспроизведения\n${steps.map((step, index) => `${index + 1}. ${step.text}`).join('\n') || '1. Укажите действие.'}\n\nh3. Ожидаемый результат\n${expected}\n\nh3. Фактический результат\n${actual}\n\nh3. Серьёзность\nУкажите серьёзность дефекта.\n${request ? `\nh3. Запрос\n${request.method} ${request.url}\nHTTP ${request.status} · ${request.duration} мс\n` : ''}`;
+  const m = qt();
+  const env = { local: m.envLocal, test: m.envTest, production: m.envProduction }[environment];
+  return `h2. ${title}\n\nh3. ${m.jiraEnvironment}\n${env}\n${typeof navigator === 'undefined' ? '' : navigator.userAgent}\n\nh3. ${m.jiraPreconditions}\n${m.jiraPreconditionsText}\n\nh3. ${m.jiraSteps}\n${steps.map((step, index) => `${index + 1}. ${step.text}`).join('\n') || m.jiraStepPlaceholder}\n\nh3. ${m.jiraExpected}\n${expected}\n\nh3. ${m.jiraActual}\n${actual}\n\nh3. ${m.jiraSeverity}\n${m.jiraSeverityText}\n${request ? `\nh3. ${m.jiraRequest}\n${request.method} ${request.url}\nHTTP ${request.status} · ${request.duration} ${m.ms}\n` : ''}`;
 }
 export function playwrightExport(requests: ApiRequest[], mode: 'api' | 'mocks'): string {
-  if (mode === 'mocks') return `// Моки для существующего теста Playwright\n${requests.map(r => `await page.route(${JSON.stringify(r.url)}, async route => {\n  if (route.request().method() !== ${JSON.stringify(r.method)}) return route.fallback();\n  await route.fulfill({ status: ${r.status || 200}, headers: ${JSON.stringify(r.responseHeaders)}, body: ${JSON.stringify(typeof r.responseBody === 'string' ? r.responseBody : JSON.stringify(r.responseBody))} });\n});`).join('\n\n')}\n`;
-  return `import { test, expect } from '@playwright/test';\n\n${requests.map((r, i) => `test(${JSON.stringify(`API ${i + 1}: ${r.method} ${new URL(r.url).pathname}`)}, async ({ request }) => {\n  const response = await request.fetch(${JSON.stringify(r.url)}, { method: ${JSON.stringify(r.method)}, headers: ${JSON.stringify(r.requestHeaders)}, ${r.requestBody ? `data: ${JSON.stringify(r.requestBody)},` : ''} });\n  // Ожидание взято из записи. Проверьте его перед запуском.\n  expect(response.status()).toBe(${r.status});\n});`).join('\n\n')}\n`;
+  if (mode === 'mocks') return `// ${qt().pwMocksComment}\n${requests.map(r => `await page.route(${JSON.stringify(r.url)}, async route => {\n  if (route.request().method() !== ${JSON.stringify(r.method)}) return route.fallback();\n  await route.fulfill({ status: ${r.status || 200}, headers: ${JSON.stringify(r.responseHeaders)}, body: ${JSON.stringify(typeof r.responseBody === 'string' ? r.responseBody : JSON.stringify(r.responseBody))} });\n});`).join('\n\n')}\n`;
+  return `import { test, expect } from '@playwright/test';\n\n${requests.map((r, i) => `test(${JSON.stringify(`API ${i + 1}: ${r.method} ${new URL(r.url).pathname}`)}, async ({ request }) => {\n  const response = await request.fetch(${JSON.stringify(r.url)}, { method: ${JSON.stringify(r.method)}, headers: ${JSON.stringify(r.requestHeaders)}, ${r.requestBody ? `data: ${JSON.stringify(r.requestBody)},` : ''} });\n  // ${qt().pwExpectationComment}\n  expect(response.status()).toBe(${r.status});\n});`).join('\n\n')}\n`;
 }
 export function mutatedRequest(request: ApiRequest, variant: NegativeTestCase): ApiRequest {
   const headers = { ...request.requestHeaders };

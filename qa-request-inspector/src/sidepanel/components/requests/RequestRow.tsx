@@ -1,4 +1,4 @@
-import { Check, Pin, Star, Tag, Turtle } from 'lucide-react'
+import { BellRing, Check, NotebookPen, Pin, Star, Tag, Turtle } from 'lucide-react'
 import type { ApiRequest, RequestTag } from '../../types'
 import { t } from '../../locales'
 import { formatBytes, getPayloadSize } from '../../utils'
@@ -8,6 +8,10 @@ interface RequestRowProps {
   isSelected: boolean
   isFavorite: boolean
   isPinned?: boolean
+  /** QA note attached to the request. */
+  note?: string
+  /** The endpoint is watched by the watchdog. */
+  isWatched?: boolean
   tags?: RequestTag[]
   compareMode?: boolean
   isCompareSelected?: boolean
@@ -26,6 +30,8 @@ export function RequestRow({
   isSelected,
   isFavorite,
   isPinned = false,
+  note,
+  isWatched = false,
   tags,
   compareMode = false,
   isCompareSelected = false,
@@ -136,6 +142,9 @@ export function RequestRow({
               {t().modifiedBadge}
             </span>
           )}
+          {isWatched && (
+            <span title={t().watchdogWatched}><BellRing className="w-3 h-3 text-amber-500" /></span>
+          )}
           {request.mocked && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">
               MOCKED
@@ -155,6 +164,12 @@ export function RequestRow({
           )}
           {pathname}
         </p>
+        {note && (
+          <p className="mt-1 flex items-start gap-1 text-[10px] text-amber-700 dark:text-amber-400" title={note}>
+            <NotebookPen className="w-3 h-3 shrink-0 mt-px" />
+            <span className="truncate">{note}</span>
+          </p>
+        )}
         {tags && tags.length > 0 && (
           <div className="flex items-center gap-1 mt-1.5">
             {tags.map(tag => (

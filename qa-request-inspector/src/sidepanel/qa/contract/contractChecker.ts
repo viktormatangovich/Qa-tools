@@ -1,6 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import type { ApiRequest } from "../../types";
 import type { QAIssue } from "../core/types";
+import { qt } from "../messages.ts";
 import type { ContractCoverage, ContractViolation, MatchedEndpoint, OpenApiDocument, OpenApiMediaTypes, OpenApiOperation, OpenApiParameter, OpenApiSchema } from "./types";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options", "trace"];
@@ -13,10 +14,10 @@ function parseDocumentText(text: string): unknown {
 
 export function parseOpenApiSpec(text: string): OpenApiDocument {
   const value: unknown = parseDocumentText(text);
-  if (!value || typeof value !== "object" || !("paths" in value)) throw new Error("Ожидается OpenAPI-документ с paths.");
+  if (!value || typeof value !== "object" || !("paths" in value)) throw new Error(qt().specNotOpenApi);
   const document = value as OpenApiDocument;
-  if (typeof document.openapi !== "string" || !document.openapi.startsWith("3.")) throw new Error("Поддерживается только OpenAPI 3.x JSON/YAML.");
-  if (!document.paths || typeof document.paths !== "object" || Array.isArray(document.paths)) throw new Error("paths должен быть объектом.");
+  if (typeof document.openapi !== "string" || !document.openapi.startsWith("3.")) throw new Error(qt().specOnlyV3);
+  if (!document.paths || typeof document.paths !== "object" || Array.isArray(document.paths)) throw new Error(qt().specPathsNotObject);
   return document;
 }
 
@@ -26,23 +27,23 @@ export async function loadOpenApiSpecFromUrl(urlText: string, request: typeof fe
   try {
     url = new URL(urlText.trim());
   } catch {
-    throw new Error("Укажите корректный URL спецификации.");
+    throw new Error(qt().specInvalidUrl);
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Поддерживаются только HTTP(S) URL.");
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(qt().specOnlyHttp);
 
   let response: Response;
   try {
     response = await request(url.toString(), { headers: { Accept: "application/json, application/vnd.oai.openapi+json" } });
   } catch {
-    throw new Error("Не удалось загрузить спецификацию по URL. Проверьте адрес и доступ к серверу.");
+    throw new Error(qt().specFetchFailed);
   }
-  if (!response.ok) throw new Error(`Сервер вернул HTTP ${response.status} при загрузке спецификации.`);
+  if (!response.ok) throw new Error(qt().specHttpError(response.status));
 
   const text = await response.text();
   try {
     parseOpenApiSpec(text);
   } catch (error) {
-    throw new Error(`Загруженный документ не является поддерживаемой OpenAPI 3.x JSON/YAML-спецификацией: ${(error as Error).message}`);
+    throw new Error(qt().specUnsupported((error as Error).message));
   }
   return text;
 }
@@ -100,7 +101,7 @@ export async function bundleExternalRefs(
   const load = async (url: string): Promise<string | null> => {
     if (keys.has(url)) return keys.get(url) ?? null;
     if (keys.size >= MAX_EXTERNAL_DOCUMENTS) {
-      warnings.push(`${url}: превышен лимит внешних документов (${MAX_EXTERNAL_DOCUMENTS}).`);
+      warnings.push(qt().externalLimit(url, MAX_EXTERNAL_DOCUMENTS));
       return null;
     }
     const key = `doc${Object.keys(external).length + 1}`;
@@ -109,14 +110,14 @@ export async function bundleExternalRefs(
       const response = await request(url, { headers: { Accept: "application/json, application/yaml, text/yaml, */*" } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const parsed = parseDocumentText(await response.text());
-      if (!parsed || typeof parsed !== "object") throw new Error("документ пуст");
+      if (!parsed || typeof parsed !== "object") throw new Error(qt().documentEmpty);
       external[key] = parsed;
       loaded += 1;
       await visit(parsed, url, key);
       return key;
     } catch (error) {
       keys.set(url, null);
-      warnings.push(`${url}: не удалось загрузить (${(error as Error).message}).`);
+      warnings.push(qt().externalFailed(url, (error as Error).message));
       return null;
     }
   };
@@ -141,10 +142,10 @@ export async function bundleExternalRefs(
         try {
           absolute = new URL(file, base).toString();
         } catch {
-          warnings.push(`${ref}: относительная ссылка, а адрес спецификации неизвестен. Загрузите спецификацию по URL.`);
+          warnings.push(qt().relativeRefUnknownBase(ref));
         }
         if (absolute && !/^https?:/i.test(absolute)) {
-          warnings.push(`${ref}: поддерживаются только HTTP(S)-ссылки.`);
+          warnings.push(qt().refOnlyHttp(ref));
           absolute = null;
         }
         if (absolute) {
@@ -306,57 +307,57 @@ function validateSchema(value: unknown, schemaInput: OpenApiSchema | undefined, 
     if (schema.nullable || types?.includes("null") || schema.enum?.includes(null)) return;
     // Without its own type the variants decide whether null is allowed.
     if (!(composed && !types)) {
-      add("Значение не должно быть null.", types?.join(" | "), "null");
+      add(qt().vNull, types?.join(" | "), "null");
       return;
     }
   } else if (types && !types.some((type) => matchesType(value, type))) {
-    add("Неожиданный тип значения.", types.join(" | "), valueType(value));
+    add(qt().vType, types.join(" | "), valueType(value));
     return;
   }
 
-  if (schema.enum && !schema.enum.some((allowed) => JSON.stringify(allowed) === JSON.stringify(value))) add("Значение отсутствует в документированном enum.");
-  if (schema.const !== undefined && JSON.stringify(schema.const) !== JSON.stringify(value)) add("Значение не равно const.", JSON.stringify(schema.const), JSON.stringify(value)?.slice(0, 80));
+  if (schema.enum && !schema.enum.some((allowed) => JSON.stringify(allowed) === JSON.stringify(value))) add(qt().vEnum);
+  if (schema.const !== undefined && JSON.stringify(schema.const) !== JSON.stringify(value)) add(qt().vConst, JSON.stringify(schema.const), JSON.stringify(value)?.slice(0, 80));
 
   if (typeof value === "number") {
     const { minimum, maximum, exclusiveMinimum, exclusiveMaximum } = schema;
-    if (typeof exclusiveMinimum === "number" && value <= exclusiveMinimum) add("Значение не больше exclusiveMinimum.", String(exclusiveMinimum), String(value));
-    if (typeof exclusiveMaximum === "number" && value >= exclusiveMaximum) add("Значение не меньше exclusiveMaximum.", String(exclusiveMaximum), String(value));
-    if (minimum !== undefined && (exclusiveMinimum === true ? value <= minimum : value < minimum)) add("Значение меньше minimum.", String(minimum), String(value));
-    if (maximum !== undefined && (exclusiveMaximum === true ? value >= maximum : value > maximum)) add("Значение больше maximum.", String(maximum), String(value));
-    if (schema.multipleOf && Math.abs(value / schema.multipleOf - Math.round(value / schema.multipleOf)) > 1e-9) add("Значение не кратно multipleOf.", String(schema.multipleOf), String(value));
+    if (typeof exclusiveMinimum === "number" && value <= exclusiveMinimum) add(qt().vExclusiveMinimum, String(exclusiveMinimum), String(value));
+    if (typeof exclusiveMaximum === "number" && value >= exclusiveMaximum) add(qt().vExclusiveMaximum, String(exclusiveMaximum), String(value));
+    if (minimum !== undefined && (exclusiveMinimum === true ? value <= minimum : value < minimum)) add(qt().vMinimum, String(minimum), String(value));
+    if (maximum !== undefined && (exclusiveMaximum === true ? value >= maximum : value > maximum)) add(qt().vMaximum, String(maximum), String(value));
+    if (schema.multipleOf && Math.abs(value / schema.multipleOf - Math.round(value / schema.multipleOf)) > 1e-9) add(qt().vMultipleOf, String(schema.multipleOf), String(value));
   }
 
   if (typeof value === "string") {
-    if (schema.minLength !== undefined && value.length < schema.minLength) add("Строка короче minLength.", String(schema.minLength), String(value.length));
-    if (schema.maxLength !== undefined && value.length > schema.maxLength) add("Строка длиннее maxLength.", String(schema.maxLength), String(value.length));
+    if (schema.minLength !== undefined && value.length < schema.minLength) add(qt().vMinLength, String(schema.minLength), String(value.length));
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) add(qt().vMaxLength, String(schema.maxLength), String(value.length));
     if (schema.pattern) {
       try {
-        if (!new RegExp(schema.pattern, "u").test(value)) add("Строка не соответствует pattern.", schema.pattern, value.slice(0, 80));
+        if (!new RegExp(schema.pattern, "u").test(value)) add(qt().vPattern, schema.pattern, value.slice(0, 80));
       } catch {
         // A pattern JavaScript cannot compile is not checked.
       }
     }
     const format = schema.format ? FORMATS[schema.format] : undefined;
-    if (format && !format(value)) add("Строка не соответствует format.", schema.format, value.slice(0, 80));
+    if (format && !format(value)) add(qt().vFormat, schema.format, value.slice(0, 80));
   }
 
   if (Array.isArray(value)) {
-    if (schema.minItems !== undefined && value.length < schema.minItems) add("Массив короче minItems.", String(schema.minItems), String(value.length));
-    if (schema.maxItems !== undefined && value.length > schema.maxItems) add("Массив длиннее maxItems.", String(schema.maxItems), String(value.length));
-    if (schema.uniqueItems && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) add("Элементы массива должны быть уникальными.");
+    if (schema.minItems !== undefined && value.length < schema.minItems) add(qt().vMinItems, String(schema.minItems), String(value.length));
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) add(qt().vMaxItems, String(schema.maxItems), String(value.length));
+    if (schema.uniqueItems && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) add(qt().vUniqueItems);
     value.forEach((item, index) => validateSchema(item, schema.items, context, `${path}[${index}]`, location, depth + 1));
   }
 
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
     const object = value as Record<string, unknown>;
     const keys = Object.keys(object);
-    if (schema.minProperties !== undefined && keys.length < schema.minProperties) add("Свойств меньше minProperties.", String(schema.minProperties), String(keys.length));
-    if (schema.maxProperties !== undefined && keys.length > schema.maxProperties) add("Свойств больше maxProperties.", String(schema.maxProperties), String(keys.length));
-    for (const key of schema.required || []) if (!(key in object)) violations.push({ location, path: `${path}.${key}`, message: "Отсутствует обязательное свойство." });
+    if (schema.minProperties !== undefined && keys.length < schema.minProperties) add(qt().vMinProperties, String(schema.minProperties), String(keys.length));
+    if (schema.maxProperties !== undefined && keys.length > schema.maxProperties) add(qt().vMaxProperties, String(schema.maxProperties), String(keys.length));
+    for (const key of schema.required || []) if (!(key in object)) violations.push({ location, path: `${path}.${key}`, message: qt().vRequiredProperty });
     for (const [key, childSchema] of Object.entries(schema.properties || {})) if (key in object) validateSchema(object[key], childSchema, context, `${path}.${key}`, location, depth + 1);
     const extra = schema.additionalProperties;
     if (extra === false) {
-      for (const key of keys) if (!schema.properties?.[key]) violations.push({ location, path: `${path}.${key}`, message: "Дополнительное свойство запрещено." });
+      for (const key of keys) if (!schema.properties?.[key]) violations.push({ location, path: `${path}.${key}`, message: qt().vAdditionalProperty });
     } else if (extra && typeof extra === "object") {
       for (const key of keys) if (!schema.properties?.[key]) validateSchema(object[key], extra, context, `${path}.${key}`, location, depth + 1);
     }
@@ -378,16 +379,16 @@ function validateSchema(value: unknown, schemaInput: OpenApiSchema | undefined, 
     const passed = results.filter((result) => result.length === 0).length;
     if (passed === 0) {
       const closest = [...results].sort((a, b) => a.length - b.length)[0]?.[0];
-      add(`Значение не соответствует ни одному варианту ${keyword}.`, closest ? `${closest.path}: ${closest.message}` : undefined);
+      add(qt().vNoVariant(keyword), closest ? `${closest.path}: ${closest.message}` : undefined);
     } else if (keyword === "oneOf" && passed > 1) {
-      add("Значение подходит сразу под несколько вариантов oneOf.", "1", String(passed));
+      add(qt().vManyOneOf, "1", String(passed));
     }
   }
 
   if (schema.not) {
     const local: ContractViolation[] = [];
     validateSchema(value, schema.not, { document, violations: local }, path, location, depth + 1);
-    if (local.length === 0) add("Значение соответствует схеме, запрещённой через not.");
+    if (local.length === 0) add(qt().vNot);
   }
 }
 
@@ -430,10 +431,10 @@ export function validateResponse(document: OpenApiDocument, request: ApiRequest)
   if (!matched) return [];
   const violations: ContractViolation[] = [];
   const documented = documentedResponse(matched.operation, request.status, document);
-  if (!documented) violations.push({ location: "response", path: "$", message: "HTTP-статус не описан в контракте.", actual: String(request.status) });
+  if (!documented) violations.push({ location: "response", path: "$", message: qt().vStatusUndocumented, actual: String(request.status) });
   const actualType = mediaType(request.responseHeaders);
   if (documented?.content && Object.keys(documented.content).length && actualType && !hasContentType(documented.content, actualType)) {
-    violations.push({ location: "response", path: "$headers.content-type", message: "Content-Type не описан в контракте.", actual: actualType });
+    violations.push({ location: "response", path: "$headers.content-type", message: qt().vContentTypeUndocumented, actual: actualType });
   }
   validateSchema(request.responseBody, contentSchema(documented?.content, actualType), { document, violations }, "$");
   return violations;
@@ -492,13 +493,13 @@ export function validateRequest(document: OpenApiDocument, request: ApiRequest):
     if (raw === undefined) continue; // cookies and other places are not checked
     const path = `$.${parameter.in}.${parameter.name}`;
     if (!raw.some(Boolean)) {
-      if (parameter.required) violations.push({ location: "request", path, message: "Отсутствует обязательный параметр." });
+      if (parameter.required) violations.push({ location: "request", path, message: qt().vRequiredParameter });
       continue;
     }
     validateSchema(parameterValue(parameter, raw, document), parameter.schema, { document, violations }, path, "request");
   }
   const requestBody = dereference(matched.operation.requestBody, document);
-  if (requestBody?.required && !request.requestBody) violations.push({ location: "request", path: "$", message: "Отсутствует обязательное тело запроса." });
+  if (requestBody?.required && !request.requestBody) violations.push({ location: "request", path: "$", message: qt().vRequiredBody });
   if (request.requestBody && requestBody?.content) {
     const actualType = mediaType(request.requestHeaders);
     const looksLikeJson = /^\s*[[{"]/.test(request.requestBody);
@@ -507,7 +508,7 @@ export function validateRequest(document: OpenApiDocument, request: ApiRequest):
       try {
         validateSchema(JSON.parse(request.requestBody), contentSchema(requestBody.content, actualType), { document, violations }, "$", "request");
       } catch {
-        violations.push({ location: "request", path: "$", message: "Тело запроса содержит некорректный JSON." });
+        violations.push({ location: "request", path: "$", message: qt().vInvalidJsonBody });
       }
     }
   }
@@ -519,7 +520,7 @@ export function contractIssues(document: OpenApiDocument, requests: ApiRequest[]
     const matched = matchEndpoint(document, request);
     if (!matched) return [];
     return [...validateRequest(document, request), ...validateResponse(document, request)].map((violation, index) => ({
-      id: `contract:${request.id}:${index}`, ruleId: "contract.openapi", category: "contract", severity: "error", title: "Нарушение API-контракта",
+      id: `contract:${request.id}:${index}`, ruleId: "contract.openapi", category: "contract", severity: "error", title: qt().contractViolation,
       description: `${violation.path}: ${violation.message}`, timestamp: request.timestamp, url: request.url, requestId: request.id,
       evidence: { location: violation.location, path: violation.path, ...(violation.expected ? { expected: violation.expected } : {}), ...(violation.actual ? { actual: violation.actual } : {}) },
     }));
@@ -554,10 +555,10 @@ export function unsupportedContractFeatures(document: OpenApiDocument): string[]
     for (const [key, item] of Object.entries(value)) {
       // Inside `properties` the keys are field names, not schema keywords.
       if (!isNameMap) {
-        if (UNSUPPORTED_KEYWORDS.includes(key)) warnings.add(path + '.' + key + ': проверка не поддерживается');
+        if (UNSUPPORTED_KEYWORDS.includes(key)) warnings.add(qt().keywordUnsupported(path + '.' + key));
         if (key === '$ref' && typeof item === 'string') {
-          if (!item.startsWith('#')) warnings.add(path + ': внешняя ссылка не загружена (' + item + ')');
-          else if (pointerValue(document, item) === undefined) warnings.add(path + ': ссылка не найдена (' + item + ')');
+          if (!item.startsWith('#')) warnings.add(qt().externalRefNotLoaded(path, item));
+          else if (pointerValue(document, item) === undefined) warnings.add(qt().refNotFound(path, item));
         }
       }
       visit(item, path + '.' + key, !isNameMap && (key === 'properties' || key === 'schemas' || key === 'paths' || key === 'x-external'));

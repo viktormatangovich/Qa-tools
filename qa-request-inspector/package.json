@@ -1,11 +1,11 @@
 {
   "name": "reqpane",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build",
-    "test:qa": "node --test --test-isolation=none --experimental-strip-types src/sidepanel/qa/core/rulesEngine.test.ts src/sidepanel/qa/contract/contractChecker.test.ts src/sidepanel/qa/negativeTesting.test.ts src/sidepanel/qa/report.test.ts src/sidepanel/qa/teamTools.test.ts src/sidepanel/qa/masking.test.ts src/sidepanel/qa/features.test.ts src/sidepanel/utils/utils.test.ts tests/background.test.mjs tests/background.integration.test.mjs",
+    "test:qa": "node --test --test-isolation=none --experimental-strip-types src/sidepanel/qa/core/rulesEngine.test.ts src/sidepanel/qa/contract/contractChecker.test.ts src/sidepanel/qa/negativeTesting.test.ts src/sidepanel/qa/report.test.ts src/sidepanel/qa/teamTools.test.ts src/sidepanel/qa/masking.test.ts src/sidepanel/qa/features.test.ts src/sidepanel/utils/utils.test.ts src/sidepanel/utils/features24.test.ts tests/background.test.mjs tests/background.integration.test.mjs",
     "zip": "node scripts/zip.mjs",
     "preview": "vite preview",
     "changeset": "changeset",
